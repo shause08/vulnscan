@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vulnscan — {{ binary_name }}</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+  --crit: #ff4040; --high: #f78166; --med: #d29922; --low: #3fb950; --info: #58a6ff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',monospace; font-size: 14px; line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+
+.container { max-width: 1400px; margin: 0 auto; padding: 24px 16px; }
+
+/* header */
+header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 24px; }
+header h1 { font-size: 22px; font-weight: 600; color: var(--text); }
+header h1 span { color: var(--accent); }
+.meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.meta dt { display: inline; font-weight: 600; color: var(--text); }
+.meta dd { display: inline; margin: 0 16px 0 4px; }
+
+/* cards row */
+.cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; min-width: 120px; text-align: center; }
+.card .num { font-size: 32px; font-weight: 700; line-height: 1; }
+.card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+.card.crit .num { color: var(--crit); }
+.card.high .num { color: var(--high); }
+.card.med  .num { color: var(--med); }
+.card.low  .num { color: var(--low); }
+.card.info .num { color: var(--info); }
+
+/* protections */
+.section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+.prot-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.prot {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  min-width: 170px;
+  max-width: 240px;
+  flex: 1 1 170px;
+}
+.prot-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.prot .name { font-weight: 700; font-size: 13px; }
+.prot .val  { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 3px; }
+.prot .desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.prot.on  { border-color: #3fb950; }
+.prot.on  .val  { background: #0a2d0a; color: #3fb950; }
+.prot.off { border-color: #f78166; }
+.prot.off .val  { background: #2d0a0a; color: #f78166; }
+.prot.part{ border-color: var(--med); }
+.prot.part .val { background: #2d2000; color: #e3b341; }
+
+/* impact analysis */
+.impact-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+.impact-item { display: flex; gap: 14px; align-items: flex-start; padding: 12px 16px; border-radius: 8px; border-left: 3px solid var(--border); }
+.impact-item.lvl-critical { background: #1c0808; border-color: var(--crit); }
+.impact-item.lvl-high     { background: #1a0e00; border-color: var(--high); }
+.impact-item.lvl-medium   { background: #191500; border-color: var(--med); }
+.impact-item.lvl-good     { background: #081508; border-color: var(--low); }
+.impact-icon { font-size: 16px; line-height: 1.4; flex-shrink: 0; width: 20px; text-align: center; }
+.impact-body { flex: 1; }
+.impact-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.impact-desc  { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.lvl-critical .impact-title { color: var(--crit); }
+.lvl-high     .impact-title { color: var(--high); }
+.lvl-medium   .impact-title { color: var(--med); }
+.lvl-good     .impact-title { color: var(--low); }
+
+/* findings table */
+table { width: 100%; border-collapse: collapse; margin-bottom: 32px; table-layout: fixed; }
+col.col-num      { width: 3%; }
+col.col-sev      { width: 9%; }
+col.col-class    { width: 14%; }
+col.col-func     { width: 10%; }
+col.col-loc      { width: 12%; }
+col.col-cwe      { width: 7%; }
+col.col-conf     { width: 7%; }
+col.col-evidence { width: 38%; }
+th { text-align: left; padding: 8px 12px; background: var(--surface); border-bottom: 2px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #1c2128; }
+
+/* severity badges */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.sev-critical { background: #5c0a0a; color: #ff6060; border: 1px solid #ff4040; }
+.sev-high     { background: #4a1500; color: #f78166; border: 1px solid #f78166; }
+.sev-medium   { background: #3d2800; color: #e3b341; border: 1px solid #d29922; }
+.sev-low      { background: #0a2d0a; color: #3fb950; border: 1px solid #3fb950; }
+.sev-info     { background: #0d2843; color: #79c0ff; border: 1px solid #58a6ff; }
+
+/* confidence / analysis tags */
+.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
+.tag.both { border-color: #58a6ff; color: #58a6ff; }
+
+/* evidence / code blocks */
+.evidence {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.cwe { font-size: 11px; color: var(--muted); }
+.func { font-family: monospace; font-size: 12px; word-break: break-all; overflow-wrap: anywhere; }
+.vuln-name { font-size: 12px; font-weight: 600; }
+.vuln-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+/* footer */
+footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: center; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- Header -->
+<header>
+  <h1>vulnscan — <span>{{ binary_name }}</span></h1>
+  <dl class="meta">
+    <dt>Arch</dt><dd>{{ result.arch }}</dd>
+    <dt>Mode</dt><dd>{{ result.scan_mode }}</dd>
+    <dt>Duration</dt><dd>{{ "%.2f"|format(result.duration_s) }}s</dd>
+    <dt>Timestamp</dt><dd>{{ result.timestamp }}</dd>
+    <dt>Binary</dt><dd>{{ result.binary_path }}</dd>
+  </dl>
+</header>
+
+<!-- Summary cards -->
+<p class="section-title">Severity Summary</p>
+<div class="cards">
+  <div class="card crit">
+    <div class="num">{{ summary.CRITICAL }}</div>
+    <div class="label">Critical</div>
+  </div>
+  <div class="card high">
+    <div class="num">{{ summary.HIGH }}</div>
+    <div class="label">High</div>
+  </div>
+  <div class="card med">
+    <div class="num">{{ summary.MEDIUM }}</div>
+    <div class="label">Medium</div>
+  </div>
+  <div class="card low">
+    <div class="num">{{ summary.LOW }}</div>
+    <div class="label">Low</div>
+  </div>
+  <div class="card info">
+    <div class="num">{{ summary.INFO }}</div>
+    <div class="label">Info</div>
+  </div>
+</div>
+
+<!-- Protections -->
+<p class="section-title">Binary Protections</p>
+<div class="prot-grid">
+
+  {% set nx_class = "on" if result.protections.nx else "off" %}
+  <div class="prot {{ nx_class }}">
+    <div class="prot-header">
+      <span class="name">NX</span>
+      <span class="val">{{ result.protections.nx | protection_label }}</span>
+    </div>
+    <div class="desc">
+      {% if result.protections.nx %}
+        Stack et heap non-exécutables — l'injection de shellcode est bloquée, l'attaquant doit recourir à des techniques ROP/ret2libc.
+      {% else %}
+        Stack et heap exécutables — un shellcode peut être injecté et exécuté directement via un dépassement de tampon.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set canary_class = "on" if result.protections.canary else "off" %}
+  <div class="prot {{ canary_class }}">
+    <div class="prot-header">
+      <span class="name">Stack Canary</span>
+      <span class="val">{{ result.protections.canary | protection_label }}</span>
+    </div>
+    <div class="desc">
+      {% if result.protections.canary %}
+        Une valeur secrète est placée avant l'adresse de retour — tout dépassement de tampon qui l'écrase est détecté et termine le processus.
+      {% else %}
+        Aucune valeur de garde — un dépassement de tampon peut écraser l'adresse de retour sans déclencher d'alerte.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set relro = result.protections.relro %}
+  {% set relro_class = "on" if relro == "full" else ("part" if relro == "partial" else "off") %}
+  <div class="prot {{ relro_class }}">
+    <div class="prot-header">
+      <span class="name">RELRO</span>
+      <span class="val">{{ relro }}</span>
+    </div>
+    <div class="desc">
+      {% if relro == "full" %}
+        GOT passée en lecture seule après démarrage — les attaques par écrasement du GOT (format string, BOF) sont bloquées.
+      {% elif relro == "partial" %}
+        GOT partiellement protégée — certaines entrées restent modifiables et peuvent être écrasées pour détourner des appels système.
+      {% else %}
+        GOT entièrement modifiable — une vulnérabilité format string ou BOF peut réécrire n'importe quelle entrée GOT.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set pie_class = "on" if result.protections.pie else "off" %}
+  <div class="prot {{ pie_class }}">
+    <div class="prot-header">
+      <span class="name">PIE</span>
+      <span class="val">{{ result.protections.pie | protection_label }}</span>
+    </div>
+    <div class="desc">
+      {% if result.protections.pie %}
+        Binaire indépendant de la position — combiné à l'ASLR, le code est chargé à une adresse aléatoire à chaque exécution.
+      {% else %}
+        Binaire à adresse fixe — le code, la GOT et la PLT sont toujours aux mêmes adresses, les gadgets ROP sont directement exploitables.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set fortify_class = "on" if result.protections.fortify else "off" %}
+  <div class="prot {{ fortify_class }}">
+    <div class="prot-header">
+      <span class="name">Fortify Source</span>
+      <span class="val">{{ result.protections.fortify | protection_label }}</span>
+    </div>
+    <div class="desc">
+      {% if result.protections.fortify %}
+        Variantes sécurisées des fonctions de chaînes actives (_chk) — vérification des bornes à l'exécution sur strcpy, sprintf, etc.
+      {% else %}
+        Aucune variante _chk — les fonctions de chaînes n'effectuent aucune vérification de borne au moment de l'exécution.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set rpath_class = "off" if result.protections.rpath else "on" %}
+  <div class="prot {{ rpath_class }}">
+    <div class="prot-header">
+      <span class="name">RPATH</span>
+      <span class="val">{{ result.protections.rpath | protection_label }}</span>
+    </div>
+    <div class="desc">
+      {% if result.protections.rpath %}
+        Chemin de bibliothèques personnalisé présent — risque de hijacking de bibliothèque si le chemin est contrôlable par un attaquant.
+      {% else %}
+        Pas de chemin personnalisé — recherche de bibliothèques selon l'ordre standard du système.
+      {% endif %}
+    </div>
+  </div>
+
+  {% set aslr = result.protections.aslr %}
+  {% set aslr_class = "on" if aslr == "full" else ("part" if aslr == "partial" else "off") %}
+  <div class="prot {{ aslr_class }}">
+    <div class="prot-header">
+      <span class="name">ASLR</span>
+      <span class="val">{{ aslr }}</span>
+    </div>
+    <div class="desc">
+      {% if aslr == "full" %}
+        Randomisation complète — stack, heap et bibliothèques sont à des adresses différentes à chaque exécution. Un exploit doit d'abord obtenir une fuite mémoire.
+      {% elif aslr == "partial" %}
+        Randomisation partielle — stack et heap aléatoires, mais le segment de code reste à adresse fixe si le binaire n'est pas PIE.
+      {% elif aslr == "disabled" %}
+        ASLR désactivé au niveau noyau — toutes les adresses (stack, heap, bibliothèques) sont fixes et prédictibles.
+      {% else %}
+        Statut ASLR indéterminé (lecture de /proc/sys/kernel/randomize_va_space impossible).
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<!-- Exploitability Impact -->
+<p class="section-title">Exploitability Impact</p>
+<div class="impact-grid">
+{% for item in impact_items %}
+  {% set icon = "✗" if item.level in ("critical", "high") else ("▲" if item.level == "medium" else "✓") %}
+  <div class="impact-item lvl-{{ item.level }}">
+    <div class="impact-icon">{{ icon }}</div>
+    <div class="impact-body">
+      <div class="impact-title">{{ item.title }}</div>
+      <div class="impact-desc">{{ item.description }}</div>
+    </div>
+  </div>
+{% else %}
+  <p style="color:var(--muted);font-size:12px;">No protection gap identified relative to the detected vulnerabilities.</p>
+{% endfor %}
+</div>
+
+<!-- Findings table -->
+<p class="section-title">Findings ({{ findings | length }})</p>
+{% if findings %}
+<table>
+  <colgroup>
+    <col class="col-num">
+    <col class="col-sev">
+    <col class="col-class">
+    <col class="col-func">
+    <col class="col-loc">
+    <col class="col-cwe">
+    <col class="col-conf">
+    <col class="col-evidence">
+  </colgroup>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Severity</th>
+      <th>Class</th>
+      <th>Function</th>
+      <th>Location</th>
+      <th>CWE</th>
+      <th>Confidence</th>
+      <th>Evidence</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for f in findings %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td><span class="badge {{ f.severity.value | severity_class }}">{{ f.severity.value }}</span></td>
+      <td>
+        <div class="vuln-name">{{ f.vuln_class.value }}</div>
+        {% set expl = f.vuln_class.value | vuln_explain %}
+        {% if expl %}<div class="vuln-desc">{{ expl }}</div>{% endif %}
+      </td>
+      <td class="func">{{ f.function }}</td>
+      <td class="func">{{ f.location }}</td>
+      <td class="cwe">{{ f.cwe or "—" }}</td>
+      <td>
+        <span class="tag {{ 'both' if f.confidence == 'both' else '' }}">{{ f.confidence }}</span>
+      </td>
+      <td class="evidence">{{ f.evidence }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color: var(--muted); padding: 16px 0;">No findings detected.</p>
+{% endif %}
+
+<footer>
+  Generated by <strong>vulnscan</strong> — academic security research tool
+</footer>
+
+</div>
+</body>
+</html>

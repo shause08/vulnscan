@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Corpus binaries (compiled artifacts)
+corpus/bin/
+
+# Generated reports
+reports/
+*.json
+*.html
+
+# Temp files from dynamic analysis
+/tmp/vulnscan_*
+
+# IDE
+.vscode/
+.idea/
+*.swp
