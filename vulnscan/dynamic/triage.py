@@ -1,26 +1,26 @@
-"""Crash triage: GDB batch analysis, exploitability classification, offset finding.
+"""Triage de crash : analyse GDB en batch, classification d'exploitabilité, calcul d'offset.
 
 Workflow
 --------
-1. Write the crashing input to a temp file.
-2. Run GDB in --batch mode with a script that:
-     - Runs the binary with stdin redirected from the temp file
-     - Captures registers (rip, rbp, rsp) at crash time
-     - Tries to run the `exploitable` CERT plugin if available
-     - Prints a backtrace
-3. Parse GDB output to extract:
-     - The crashing RIP value
-     - Whether that value looks like a cyclic pattern (→ offset computable)
-     - The exploitability verdict from `exploitable` (if present)
-4. If RIP contains cyclic-pattern bytes, call `pwn.cyclic_find` to compute
-   the exact offset from input start to saved return address.
-5. Return a TriageResult consumed by the severity engine.
+1. Écrit l'entrée crashante dans un fichier temporaire.
+2. Lance GDB en mode --batch avec un script qui :
+     - Exécute le binaire avec stdin redirigé depuis le fichier temporaire
+     - Capture les registres (rip, rbp, rsp) au moment du crash
+     - Tente d'exécuter le plugin exploitable du CERT si disponible
+     - Affiche une backtrace
+3. Analyse la sortie GDB pour extraire :
+     - La valeur de RIP au crash
+     - Si cette valeur ressemble à un pattern cyclique (→ offset calculable)
+     - Le verdict d'exploitabilité de `exploitable` (si présent)
+4. Si RIP contient des octets de pattern cyclique, appelle `pwn.cyclic_find` pour
+   calculer l'offset exact depuis le début de l'entrée jusqu'à l'adresse de retour sauvegardée.
+5. Retourne un TriageResult consommé par le moteur de sévérité.
 
-Fallback (no GDB or no exploitable plugin)
--------------------------------------------
-Parse the signal number and the crash address from the RunResult. If the
-crash address looks like a cyclic-pattern value we can still compute the
-offset. Classify as UNKNOWN exploitability.
+Repli (pas de GDB ni de plugin exploitable)
+--------------------------------------------
+Analyse le numéro de signal et l'adresse de crash depuis le RunResult. Si l'adresse
+de crash ressemble à une valeur de pattern cyclique, on peut quand même calculer l'offset.
+Classe en exploitabilité UNKNOWN.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from vulnscan.utils.shell import run as shell_run
 
 logger = get_logger(__name__)
 
-# Exploitability ratings (CERT exploitable plugin vocabulary)
+# Niveaux d'exploitabilité (vocabulaire du plugin exploitable du CERT)
 EXPLOITABLE           = "EXPLOITABLE"
 PROBABLY_EXPLOITABLE  = "PROBABLY_EXPLOITABLE"
 PROBABLY_NOT          = "PROBABLY_NOT_EXPLOITABLE"
@@ -59,12 +59,12 @@ class TriageResult:
     stdin_data: bytes
     argv_extra: list[str]
     signal_name: str
-    rip_value: Optional[int]           # RIP at crash (None if unknown)
-    rip_hex: str                       # "0xdeadbeef" or ""
-    offset_to_rip: Optional[int]       # bytes from input start to saved RIP
-    exploitability: str                # one of the constants above
+    rip_value: Optional[int]           # RIP au crash (None si inconnu)
+    rip_hex: str                       # "0xdeadbeef" ou ""
+    offset_to_rip: Optional[int]       # octets depuis le début de l'entrée jusqu'au RIP sauvegardé
+    exploitability: str                # l'une des constantes ci-dessus
     exploitability_reason: str
-    backtrace: str                     # first 5 frames as text
+    backtrace: str                     # 5 premiers frames en texte
     gdb_available: bool
     exploitable_plugin: bool
 
@@ -76,17 +76,17 @@ def triage(
     argv_extra: list[str] | None = None,
     timeout: int = 20,
 ) -> TriageResult:
-    """Triage a crash: run GDB, extract RIP, compute offset, classify."""
+    """Triage d'un crash : lance GDB, extrait RIP, calcule l'offset, classifie."""
     gdb_ok = _gdb_available()
 
     if gdb_ok:
         return _triage_gdb(binary_path, crash_input, argv_extra or [], timeout)
     else:
-        logger.warning("GDB not found — falling back to signal-only triage")
+        logger.warning("GDB introuvable — repli sur le triage par signal uniquement")
         return _triage_fallback(binary_path, crash_input, argv_extra or [])
 
 
-# ── GDB-based triage ─────────────────────────────────────────────────────────
+# ── triage GDB ────────────────────────────────────────────────────────────────
 
 def _triage_gdb(
     binary_path: Path,
@@ -112,9 +112,9 @@ def _triage_gdb(
             limit_resources=False,
         )
         output = (result.stdout + result.stderr).decode(errors="replace")
-        logger.debug("GDB output (%d chars):\n%s", len(output), output[:800])
+        logger.debug("Sortie GDB (%d caractères) :\n%s", len(output), output[:800])
     except Exception as exc:
-        logger.warning("GDB execution failed: %s", exc)
+        logger.warning("Exécution GDB échouée : %s", exc)
         output = ""
     finally:
         for f in [input_file, script_file]:
@@ -143,7 +143,7 @@ def _build_gdb_script(binary: str, input_file: str, argv_extra: list[str]) -> st
     ]
     lines += [
         "echo ===STACK_TOP===\\n",
-        # Print the 8 bytes at RSP — this is the (possibly corrupted) return address
+        # Lit les 8 octets à RSP — c'est l'adresse de retour (éventuellement corrompue)
         "x/2xg $rsp",
     ]
     if has_exploitable:
@@ -165,12 +165,12 @@ def _parse_gdb_output(
     m = _RE_SIGSEGV.search(output)
     signal_name = m.group(1) if m else ""
 
-    # RIP value — prefer value at RSP (corrupted return address) over current RIP
+    # Valeur de RIP — préfère la valeur à RSP (adresse de retour corrompue) sur le RIP courant
     rip_value: Optional[int] = None
     rip_hex = ""
     _re_xg = re.compile(r"0x[0-9a-f]+\s*:\s*(0x[0-9a-f]+)")
 
-    # Try to extract the value popped by ret from the stack_top section
+    # Tente d'extraire la valeur dépilée par ret depuis la section stack_top
     if "===STACK_TOP===" in output:
         stack_section = output.split("===STACK_TOP===", 1)[1].split("===", 1)[0]
         m = _re_xg.search(stack_section)
@@ -181,7 +181,7 @@ def _parse_gdb_output(
             except ValueError:
                 pass
 
-    # Fall back to the RIP register value
+    # Repli sur la valeur du registre RIP
     if rip_value is None and "===REGISTERS===" in output:
         reg_section = output.split("===REGISTERS===", 1)[1].split("===", 1)[0]
         m = _RE_RIP.search(reg_section)
@@ -197,7 +197,7 @@ def _parse_gdb_output(
     if "===BACKTRACE===" in output:
         bt = output.split("===BACKTRACE===", 1)[1].split("===", 1)[0].strip()
 
-    # Exploitability
+    # Exploitabilité
     exploitability = UNKNOWN
     exploit_reason = ""
     has_plugin = _exploitable_available()
@@ -210,10 +210,10 @@ def _parse_gdb_output(
         if m:
             exploit_reason = m.group(2).strip()
     else:
-        # Heuristic: if RIP looks like a cyclic pattern → probably exploitable
+        # Heuristique : si RIP ressemble à un pattern cyclique → probablement exploitable
         exploitability, exploit_reason = _heuristic_exploitability(rip_value, signal_name)
 
-    # Offset calculation via cyclic_find
+    # Calcul d'offset via cyclic_find
     offset = _find_offset(rip_value, crash_input)
 
     return TriageResult(
@@ -232,7 +232,7 @@ def _parse_gdb_output(
     )
 
 
-# ── Fallback (no GDB) ─────────────────────────────────────────────────────────
+# ── repli (pas de GDB) ────────────────────────────────────────────────────────
 
 def _triage_fallback(
     binary_path: Path,
@@ -257,13 +257,13 @@ def _triage_fallback(
     )
 
 
-# ── Offset calculation ────────────────────────────────────────────────────────
+# ── calcul d'offset ───────────────────────────────────────────────────────────
 
 def _find_offset(rip_value: Optional[int], crash_input: bytes) -> Optional[int]:
-    """Try to compute the offset from crash_input start to saved RIP.
+    """Tente de calculer l'offset depuis le début de crash_input jusqu'au RIP sauvegardé.
 
-    Uses pwntools cyclic_find if the RIP value looks like a cyclic pattern.
-    Falls back to a brute-force search in the raw input bytes.
+    Utilise pwntools cyclic_find si la valeur de RIP ressemble à un pattern cyclique.
+    Repli sur une recherche par force brute dans les octets bruts de l'entrée.
     """
     if not crash_input:
         return None
@@ -274,10 +274,10 @@ def _find_offset(rip_value: Optional[int], crash_input: bytes) -> Optional[int]:
         from pwn import cyclic_find, cyclic, context
         context.log_level = "error"
 
-        # Try RIP value directly (little-endian 4-byte lookup in cyclic alphabet)
+        # Essaie la valeur de RIP directement (lookup little-endian 4 octets dans l'alphabet cyclique)
         if rip_value is not None:
             try:
-                # cyclic_find accepts int (4-byte) or bytes (4-byte subsequence)
+                # cyclic_find accepte un int (4 octets) ou bytes (sous-séquence de 4 octets)
                 offset = cyclic_find(rip_value & 0xFFFFFFFF)
                 if 0 <= offset <= len(crash_input):
                     logger.debug("cyclic_find(0x%x) → offset=%d", rip_value, offset)
@@ -285,14 +285,14 @@ def _find_offset(rip_value: Optional[int], crash_input: bytes) -> Optional[int]:
             except Exception:
                 pass
 
-        # Search the input for a 4-byte cyclic subsequence that appears in it
+        # Cherche dans l'entrée une sous-séquence cyclique de 4 octets
         pattern_len = len(crash_input)
         try:
             pat = cyclic(pattern_len)
         except Exception:
             return None
 
-        # Find where the first cyclic character appears in crash_input
+        # Trouve où le premier caractère cyclique apparaît dans crash_input
         for i in range(len(crash_input) - 4):
             chunk = crash_input[i: i + 4]
             try:
@@ -308,45 +308,45 @@ def _find_offset(rip_value: Optional[int], crash_input: bytes) -> Optional[int]:
     return None
 
 
-# ── Exploitability heuristics ─────────────────────────────────────────────────
+# ── heuristiques d'exploitabilité ─────────────────────────────────────────────
 
 def _heuristic_exploitability(
     rip_value: Optional[int],
     signal_name: str,
 ) -> tuple[str, str]:
-    """Classify exploitability without the exploitable plugin."""
+    """Classifie l'exploitabilité sans le plugin exploitable."""
     if rip_value is not None:
-        # RIP is in the cyclic-pattern alphabet range → attacker controlled
+        # RIP dans la plage de l'alphabet cyclique → contrôlé par l'attaquant
         high_byte = (rip_value >> 24) & 0xFF
-        if 0x40 <= high_byte <= 0x7A:  # ASCII printable range
-            return PROBABLY_EXPLOITABLE, "RIP contains ASCII bytes — likely attacker-controlled"
+        if 0x40 <= high_byte <= 0x7A:  # plage ASCII imprimable
+            return PROBABLY_EXPLOITABLE, "RIP contient des octets ASCII — probablement contrôlé par l'attaquant"
         if rip_value == 0 or rip_value > 0x7FFFFFFFFFFF:
-            return PROBABLY_NOT, "RIP is null/kernel-space — likely NULL dereference"
-        return PROBABLY_EXPLOITABLE, "RIP redirected — potential control-flow hijack"
+            return PROBABLY_NOT, "RIP est null/espace noyau — probable déréférencement NULL"
+        return PROBABLY_EXPLOITABLE, "RIP redirigé — détournement de flux de contrôle potentiel"
     if signal_name in ("SIGSEGV", "SIGBUS"):
-        return UNKNOWN, "Crash without register data — assume potentially exploitable"
+        return UNKNOWN, "Crash sans données de registre — supposé potentiellement exploitable"
     if signal_name == "SIGABRT":
-        return PROBABLY_NOT, "SIGABRT usually from assertion/abort — not directly exploitable"
+        return PROBABLY_NOT, "SIGABRT généralement issu d'une assertion/abort — non exploitable directement"
     return UNKNOWN, ""
 
 
-# ── Severity engine ───────────────────────────────────────────────────────────
+# ── moteur de sévérité ────────────────────────────────────────────────────────
 
 def estimate_severity(
     triage: TriageResult,
     vuln_class: "VulnClass",
     protections: "Protection",
 ) -> "Severity":
-    """Combine triage + vuln_class + protections into a Severity level.
+    """Combine triage + vuln_class + protections en un niveau de Severity.
 
-    Scale documented in docs/algorithmes.md.
+    Échelle documentée dans docs/algorithmes.md.
     """
     from vulnscan.report.model import Severity, VulnClass
 
     exploit = triage.exploitability
     has_offset = triage.offset_to_rip is not None
 
-    # Base score by class
+    # Score de base par classe
     base = {
         VulnClass.STACK_BOF:      4,
         VulnClass.HEAP_BOF:       3,
@@ -357,7 +357,7 @@ def estimate_severity(
         VulnClass.UNKNOWN:        1,
     }.get(vuln_class, 1)
 
-    # Adjust for exploitability
+    # Ajustement selon l'exploitabilité
     if exploit == EXPLOITABLE:
         base += 2
     elif exploit == PROBABLY_EXPLOITABLE:
@@ -365,11 +365,11 @@ def estimate_severity(
     elif exploit == PROBABLY_NOT:
         base -= 1
 
-    # Offset known → more precise (more dangerous)
+    # Offset connu → plus précis (plus dangereux)
     if has_offset:
         base += 1
 
-    # Mitigations present → lower score
+    # Mitigations présentes → score réduit
     if protections.canary:
         base -= 1
     if protections.nx:
@@ -379,12 +379,12 @@ def estimate_severity(
     if protections.relro == "full":
         base -= 1
 
-    # Clamp to [1, 5] and map to Severity
+    # Borne à [1, 5] et mappage vers Severity
     base = max(1, min(5, base))
     return [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL][base - 1]
 
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
+# ── utilitaires ───────────────────────────────────────────────────────────────
 
 def _gdb_available() -> bool:
     import shutil
@@ -392,7 +392,7 @@ def _gdb_available() -> bool:
 
 
 def _exploitable_available() -> bool:
-    """Check if the CERT exploitable GDB plugin is installed."""
+    """Vérifie si le plugin GDB exploitable du CERT est installé."""
     if not _gdb_available():
         return False
     try:
@@ -404,7 +404,7 @@ def _exploitable_available() -> bool:
         return result.returncode == 0
     except Exception:
         pass
-    # Also check common alternative paths
+    # Vérifie aussi les chemins alternatifs courants
     import os
     paths = [
         os.path.expanduser("~/.gdb/exploitable/exploitable.py"),

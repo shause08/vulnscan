@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,7 +16,7 @@ a { color: var(--accent); text-decoration: none; }
 
 .container { max-width: 1400px; margin: 0 auto; padding: 24px 16px; }
 
-/* header */
+/* en-tête */
 header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 24px; }
 header h1 { font-size: 22px; font-weight: 600; color: var(--text); }
 header h1 span { color: var(--accent); }
@@ -24,7 +24,7 @@ header h1 span { color: var(--accent); }
 .meta dt { display: inline; font-weight: 600; color: var(--text); }
 .meta dd { display: inline; margin: 0 16px 0 4px; }
 
-/* cards row */
+/* cartes de résumé */
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; min-width: 120px; text-align: center; }
 .card .num { font-size: 32px; font-weight: 700; line-height: 1; }
@@ -58,7 +58,7 @@ header h1 span { color: var(--accent); }
 .prot.part{ border-color: var(--med); }
 .prot.part .val { background: #2d2000; color: #e3b341; }
 
-/* impact analysis */
+/* analyse d'impact */
 .impact-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
 .impact-item { display: flex; gap: 14px; align-items: flex-start; padding: 12px 16px; border-radius: 8px; border-left: 3px solid var(--border); }
 .impact-item.lvl-critical { background: #1c0808; border-color: var(--crit); }
@@ -74,7 +74,7 @@ header h1 span { color: var(--accent); }
 .lvl-medium   .impact-title { color: var(--med); }
 .lvl-good     .impact-title { color: var(--low); }
 
-/* findings table */
+/* tableau des vulnérabilités */
 table { width: 100%; border-collapse: collapse; margin-bottom: 32px; table-layout: fixed; }
 col.col-num      { width: 3%; }
 col.col-sev      { width: 9%; }
@@ -89,7 +89,7 @@ td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align:
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: #1c2128; }
 
-/* severity badges */
+/* badges de sévérité */
 .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
 .sev-critical { background: #5c0a0a; color: #ff6060; border: 1px solid #ff4040; }
 .sev-high     { background: #4a1500; color: #f78166; border: 1px solid #f78166; }
@@ -97,11 +97,11 @@ tr:hover td { background: #1c2128; }
 .sev-low      { background: #0a2d0a; color: #3fb950; border: 1px solid #3fb950; }
 .sev-info     { background: #0d2843; color: #79c0ff; border: 1px solid #58a6ff; }
 
-/* confidence / analysis tags */
+/* tags de confiance / analyse */
 .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
 .tag.both { border-color: #58a6ff; color: #58a6ff; }
 
-/* evidence / code blocks */
+/* bloc de preuve */
 .evidence {
   font-family: monospace;
   font-size: 12px;
@@ -115,43 +115,43 @@ tr:hover td { background: #1c2128; }
 .vuln-name { font-size: 12px; font-weight: 600; }
 .vuln-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
 
-/* footer */
+/* pied de page */
 footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: center; font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="container">
 
-<!-- Header -->
+<!-- En-tête -->
 <header>
   <h1>vulnscan — <span>{{ binary_name }}</span></h1>
   <dl class="meta">
     <dt>Arch</dt><dd>{{ result.arch }}</dd>
     <dt>Mode</dt><dd>{{ result.scan_mode }}</dd>
-    <dt>Duration</dt><dd>{{ "%.2f"|format(result.duration_s) }}s</dd>
-    <dt>Timestamp</dt><dd>{{ result.timestamp }}</dd>
-    <dt>Binary</dt><dd>{{ result.binary_path }}</dd>
+    <dt>Durée</dt><dd>{{ "%.2f"|format(result.duration_s) }}s</dd>
+    <dt>Horodatage</dt><dd>{{ result.timestamp }}</dd>
+    <dt>Binaire</dt><dd>{{ result.binary_path }}</dd>
   </dl>
 </header>
 
-<!-- Summary cards -->
-<p class="section-title">Severity Summary</p>
+<!-- Cartes de résumé -->
+<p class="section-title">Résumé de sévérité</p>
 <div class="cards">
   <div class="card crit">
     <div class="num">{{ summary.CRITICAL }}</div>
-    <div class="label">Critical</div>
+    <div class="label">Critique</div>
   </div>
   <div class="card high">
     <div class="num">{{ summary.HIGH }}</div>
-    <div class="label">High</div>
+    <div class="label">Élevée</div>
   </div>
   <div class="card med">
     <div class="num">{{ summary.MEDIUM }}</div>
-    <div class="label">Medium</div>
+    <div class="label">Moyenne</div>
   </div>
   <div class="card low">
     <div class="num">{{ summary.LOW }}</div>
-    <div class="label">Low</div>
+    <div class="label">Faible</div>
   </div>
   <div class="card info">
     <div class="num">{{ summary.INFO }}</div>
@@ -159,8 +159,8 @@ footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: cen
   </div>
 </div>
 
-<!-- Protections -->
-<p class="section-title">Binary Protections</p>
+<!-- Protections du binaire -->
+<p class="section-title">Protections du binaire</p>
 <div class="prot-grid">
 
   {% set nx_class = "on" if result.protections.nx else "off" %}
@@ -278,8 +278,8 @@ footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: cen
 
 </div>
 
-<!-- Exploitability Impact -->
-<p class="section-title">Exploitability Impact</p>
+<!-- Impact sur l'exploitabilité -->
+<p class="section-title">Impact sur l'exploitabilité</p>
 <div class="impact-grid">
 {% for item in impact_items %}
   {% set icon = "✗" if item.level in ("critical", "high") else ("▲" if item.level == "medium" else "✓") %}
@@ -291,12 +291,12 @@ footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: cen
     </div>
   </div>
 {% else %}
-  <p style="color:var(--muted);font-size:12px;">No protection gap identified relative to the detected vulnerabilities.</p>
+  <p style="color:var(--muted);font-size:12px;">Aucun déficit de protection identifié par rapport aux vulnérabilités détectées.</p>
 {% endfor %}
 </div>
 
-<!-- Findings table -->
-<p class="section-title">Findings ({{ findings | length }})</p>
+<!-- Tableau des vulnérabilités -->
+<p class="section-title">Vulnérabilités détectées ({{ findings | length }})</p>
 {% if findings %}
 <table>
   <colgroup>
@@ -312,13 +312,13 @@ footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: cen
   <thead>
     <tr>
       <th>#</th>
-      <th>Severity</th>
-      <th>Class</th>
-      <th>Function</th>
-      <th>Location</th>
+      <th>Sévérité</th>
+      <th>Classe</th>
+      <th>Fonction</th>
+      <th>Adresse</th>
       <th>CWE</th>
-      <th>Confidence</th>
-      <th>Evidence</th>
+      <th>Confiance</th>
+      <th>Preuve</th>
     </tr>
   </thead>
   <tbody>
@@ -343,11 +343,11 @@ footer { border-top: 1px solid var(--border); padding-top: 16px; text-align: cen
   </tbody>
 </table>
 {% else %}
-<p style="color: var(--muted); padding: 16px 0;">No findings detected.</p>
+<p style="color: var(--muted); padding: 16px 0;">Aucune vulnérabilité détectée.</p>
 {% endif %}
 
 <footer>
-  Generated by <strong>vulnscan</strong> — academic security research tool
+  Généré par <strong>vulnscan</strong> — outil de recherche en sécurité académique
 </footer>
 
 </div>

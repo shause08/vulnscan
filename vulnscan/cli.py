@@ -1,4 +1,4 @@
-"""Command-line interface for vulnscan."""
+"""Interface en ligne de commande pour vulnscan."""
 
 from __future__ import annotations
 
@@ -59,10 +59,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def cmd_scan(args: argparse.Namespace) -> int:
     binary = args.binary
     if not binary.exists():
-        logger.error("Binary not found: %s", binary)
+        logger.error("Binaire introuvable : %s", binary)
         return 1
     if not binary.is_file():
-        logger.error("Not a file: %s", binary)
+        logger.error("N'est pas un fichier : %s", binary)
         return 1
 
     result = scan(
@@ -76,9 +76,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     try:
         from vulnscan.report.generator import render_html
         out_path.write_text(render_html(result), encoding="utf-8")
-        logger.info("HTML report written to %s", out_path)
+        logger.info("Rapport HTML écrit dans %s", out_path)
     except ImportError:
-        logger.warning("jinja2 not installed — cannot generate HTML report.")
+        logger.warning("jinja2 non installé — impossible de générer le rapport HTML.")
 
     _print_summary(result)
     return 0
@@ -86,11 +86,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def _print_summary(result) -> None:
     print(f"\n{'='*60}")
-    print(f"  vulnscan report — {Path(result.binary_path).name}")
+    print(f"  vulnscan — {Path(result.binary_path).name}")
     print(f"{'='*60}")
-    print(f"  Arch       : {result.arch}")
-    print(f"  Duration   : {result.duration_s}s")
-    print(f"  Findings   : {len(result.findings)}")
+    print(f"  Arch             : {result.arch}")
+    print(f"  Durée            : {result.duration_s}s")
+    print(f"  Vulnérabilités   : {len(result.findings)}")
     from vulnscan.report.model import Severity
     for sev in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]:
         count = sum(1 for f in result.findings if f.severity == sev)
@@ -102,12 +102,12 @@ def _print_summary(result) -> None:
 def cmd_check_deps(_args: argparse.Namespace) -> int:
     missing = check_system_deps()
     if missing:
-        print(f"[MISSING] The following system tools are required but not found:")
+        print("[MANQUANT] Les outils système suivants sont requis mais absents :")
         for m in missing:
             print(f"  - {m}")
-        print("\nInstall them with:  sudo apt install gcc gdb make")
+        print("\nInstallez-les avec :  sudo apt install gcc gdb make")
         return 1
-    print("[OK] All required system tools are available (gcc, gdb, make).")
+    print("[OK] Tous les outils système requis sont disponibles (gcc, gdb, make).")
     return 0
 
 
@@ -116,11 +116,11 @@ def main() -> None:
     args = parser.parse_args()
     configure_root(verbose=getattr(args, "verbose", False))
 
-    # Always verify deps first, but don't block on missing ones — just warn.
+    # Vérifie les dépendances au démarrage, sans bloquer si certaines manquent.
     missing = check_system_deps()
     if missing and getattr(args, "command", None) == "scan":
         logger.warning(
-            "Missing system tools: %s — dynamic analysis will be limited.",
+            "Outils système manquants : %s — l'analyse dynamique sera limitée.",
             ", ".join(missing),
         )
 

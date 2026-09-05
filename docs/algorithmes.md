@@ -97,14 +97,13 @@ Propagation (over-approximation)
 
 Puits → émission de finding
   strcpy(dst, src)  : src (rsi) tainted → STACK_BOF
-  printf(fmt, ...)  : fmt (rdi) tainted → FORMAT_STRING
   system(cmd)       : cmd (rdi) tainted → CRITICAL
   memcpy(d,s,n)     : src (rsi) tainted → heap/stack BOF
 ```
 
-### Heuristique format string sans taint inter-procédural
+### Heuristique format string (sans taint inter-procédural)
 
-`printf(buf)` où `buf` est un paramètre de la fonction courante ne peut pas être tracé sans analyse inter-procédurale. L'heuristique : si l'argument de format de `printf`/`fprintf` est `rbp_rel` (buffer sur la frame courante), émettre FORMAT_STRING directement.
+`printf` et `fprintf` ne sont pas dans le catalogue `dangerous_funcs` (trop de faux positifs : tout binaire qui affiche du texte avec un format littéral serait signalé). La détection repose sur une heuristique intra-procédurale : si l'argument de format de `printf`/`fprintf` est une adresse RBP-relative (buffer alloué sur la frame courante), le buffer provient forcément de données locales et est suspect.
 
 ```python
 if func_name in ("printf", "fprintf"):
@@ -113,6 +112,8 @@ if func_name in ("printf", "fprintf"):
     if val_type == "rbp_rel":
         emit(FORMAT_STRING, HIGH)
 ```
+
+Cette heuristique capte le pattern `char buf[N]; fgets(buf, N, stdin); printf(buf);` sans analyse inter-procédurale, au prix de quelques faux positifs sur les buffers initialisés avec des formats constants.
 
 ## 4. Calcul de l'offset vers RIP (cyclic_find)
 
@@ -185,8 +186,43 @@ Rationale : un offset vers RIP connu signifie que l'attaquant peut construire un
 <ACCESS_OP> of size N at 0x...
     #0 0xaddr in func_name file.c:line
     #1 ...
+freed by thread T0 here:
+    #0 0xaddr in free ...
+    #1 0xaddr in main file.c:line
+previously allocated by thread T0 here:
+    ...
 SUMMARY: AddressSanitizer: <type>
 ```
+
+### Découpe en sections
+
+ASan produit plusieurs sections de backtrace pour un même évènement (accès fautif, libération, allocation). Le parseur divise le bloc brut avant le premier marqueur secondaire (`freed by thread`, `previously allocated by`, `SUMMARY:`, `Shadow bytes`, `Address 0x`) pour ne conserver que la **section primaire** (l'accès qui a déclenché l'erreur).
+
+```python
+sec_match = _RE_SECONDARY.search(self.raw)
+primary_text = self.raw[:sec_match.start()] if sec_match else self.raw
+self.frames = self._extract_frames(primary_text)
+```
+
+Les frames de la section `freed by` sont capturées séparément dans `freed_frames` pour les erreurs UAF/double-free, afin d'afficher le site du `free()` dans la preuve.
+
+### Tri et filtrage des frames
+
+Les frames sont triées par index après extraction (garantit l'ordre #0, #1, #2… même si la regex les trouve dans un ordre quelconque).
+
+Les frames appartenant aux runtimes internes sont ignorées :
+
+```python
+_RUNTIME_PREFIXES = (
+    "__interceptor_", "__sanitizer_", "__sanitizer::",
+    "__asan_", "_asan_", "asan_",
+    "__libc_", "__GI_", "libc_",
+)
+_RUNTIME_EXACT = {"??", "<unknown>", "_start", "__start",
+                   "__libc_start_main", "__libc_start_call_main"}
+```
+
+Note : le namespace C++ `__sanitizer::` (double deux-points) est distinct du préfixe `__sanitizer_` (underscore), d'où l'entrée séparée.
 
 ### Cas particulier : DEADLYSIGNAL (nested bug)
 
@@ -207,15 +243,36 @@ if not self.error_type and "DEADLYSIGNAL" in self.raw:
         self.error_type = m.group(1).lower()
 ```
 
-### Sélection de la première frame utilisateur
+### Colonne localisation
 
-Les frames ASan internes sont filtrées par préfixe :
+Le champ `location` du Finding est rempli avec l'adresse hexadécimale ASan (`0x...`) en priorité. La référence source (`src/file.c:line`), issue des symboles DWARF embarqués dans le binaire compilé avec `-g`, est conservée dans le texte de preuve mais n'est pas affichée dans la colonne adresse pour éviter toute confusion avec une adresse binaire.
+
+## 7. Entrées ASan de référence (baseline)
+
+### Problème
+
+Certaines vulnérabilités (UAF, off-by-one sur RBP, corruptions silencieuses) ne provoquent pas de crash dans le binaire non instrumenté, donc le fuzzer ne génère aucune entrée crashante et ASan n'est jamais invoqué.
+
+### Solution
+
+Un ensemble d'entrées **systématiques** est toujours fourni au binaire ASan, indépendamment des résultats du fuzzer :
 
 ```python
-skip_prefixes = (
-    "__interceptor_", "__sanitizer_", "__asan_", "_asan_", "asan_",
-    "__libc_", "__GI_", "libc_",
-)
+_ASAN_BASELINE: list[bytes] = [
+    b"",              # entrée vide — détecte les bugs sans entrée (UAF à l'init)
+    b"A" * 63 + b"\n",
+    b"A" * 64 + b"\n",   # taille exacte du buffer typique
+    b"A" * 65 + b"\n",   # off-by-one
+    b"A" * 127 + b"\n",
+    b"A" * 128 + b"\n",
+    b"A" * 129 + b"\n",
+]
 ```
 
-`main()` est considérée comme frame utilisateur valide (contrairement à certaines implémentations qui la filtrent).
+Les tailles 63/64/65 et 127/128/129 encadrent les puissances de deux courantes pour attraper les off-by-one. L'entrée vide déclenche les bugs qui se produisent dès le démarrage (ex. : UAF dont le malloc initial recycle immédiatement le bloc libéré).
+
+### Déduplication des findings dynamiques
+
+Plusieurs exécutions ASan sur des entrées différentes peuvent produire le même finding. La déduplication ne s'applique qu'aux findings **dynamiques** (pas statiques, qui apportent chacun une preuve distincte). La clé est `(vuln_class, function)` ; le meilleur finding est conservé selon l'ordre `confidence` puis `severity`.
+
+La confiance `"both"` au niveau dynamique signifie que plusieurs exécutions ASan/fuzzer ont détecté indépendamment le même bug — distinct du `"both"` statique+dynamique calculé par `_merge_findings`.

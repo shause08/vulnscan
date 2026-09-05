@@ -1,7 +1,7 @@
-"""Safe binary executor with signal capture and resource limits.
+"""Exécuteur de binaires sécurisé avec capture de signal et limites de ressources.
 
-Executes a binary with controlled stdin/argv, applies a hard timeout,
-and returns a structured result including crash detection and signal name.
+Exécute un binaire avec un stdin/argv contrôlé, applique un timeout strict,
+et retourne un résultat structuré incluant la détection de crash et le nom du signal.
 """
 
 from __future__ import annotations
@@ -19,10 +19,10 @@ from vulnscan.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Per-execution resource limits for hostile binaries
-_AS_LIMIT  = 256 * 1024 * 1024   # 256 MiB address space
-_CPU_LIMIT = 10                   # 10 CPU-seconds
-_FILE_LIMIT = 0                   # no new files written
+# Limites de ressources par exécution pour les binaires potentiellement hostiles
+_AS_LIMIT  = 256 * 1024 * 1024   # 256 Mio d'espace d'adressage
+_CPU_LIMIT = 10                   # 10 secondes CPU
+_FILE_LIMIT = 0                   # aucun nouveau fichier écrit
 
 _SIGNAL_NAMES: dict[int, str] = {
     signal.SIGSEGV: "SIGSEGV",
@@ -41,16 +41,16 @@ _SIGNAL_NAMES: dict[int, str] = {
 class RunResult:
     binary: str
     stdin_data: bytes
-    argv_extra: list[str]             # args after the binary name
+    argv_extra: list[str]             # arguments après le nom du binaire
     returncode: int
-    signal_num: int                   # 0 if no signal
-    signal_name: str                  # "SIGSEGV" / "" if none
+    signal_num: int                   # 0 si pas de signal
+    signal_name: str                  # "SIGSEGV" / "" si aucun
     stdout: bytes
     stderr: bytes
     timed_out: bool
     crashed: bool
     duration_s: float
-    env_vars: dict[str, str]          # extra env (e.g. ASAN_OPTIONS)
+    env_vars: dict[str, str]          # variables d'env supplémentaires (ex. ASAN_OPTIONS)
 
     @property
     def crash_summary(self) -> str:
@@ -71,7 +71,7 @@ def run(
     capture_output: bool = True,
     limit_resources: bool = True,
 ) -> RunResult:
-    """Execute *binary_path* safely and return a RunResult."""
+    """Exécute *binary_path* de manière sécurisée et retourne un RunResult."""
     argv = [str(binary_path)] + (argv_extra or [])
     env = _build_env(env_vars or {})
 
@@ -96,16 +96,16 @@ def run(
             timed_out = True
 
     except FileNotFoundError:
-        logger.error("Binary not found: %s", binary_path)
+        logger.error("Binaire introuvable : %s", binary_path)
         raise
     except Exception as exc:
-        logger.error("Runner error for %s: %s", binary_path, exc)
+        logger.error("Erreur du runner pour %s : %s", binary_path, exc)
         raise
 
     duration = time.monotonic() - t0
     rc = proc.returncode
 
-    # On Unix, negative returncode = killed by -signal_number
+    # Sous Unix, un returncode négatif = tué par -numéro_de_signal
     sig_num = 0
     if rc < 0:
         sig_num = -rc
@@ -141,10 +141,10 @@ def run_asan(
     argv_extra: list[str] | None = None,
     timeout: int = 15,
 ) -> RunResult:
-    """Run an ASan-instrumented binary and capture its full error report.
+    """Exécute un binaire instrumenté par ASan et capture son rapport d'erreur complet.
 
-    ASan maps a large shadow-memory region (~16× the process AS), so we must
-    NOT apply RLIMIT_AS here; the binary is already instrumented and sandboxed.
+    ASan mappe une grande région de mémoire fantôme (~16× l'AS du processus), donc
+    RLIMIT_AS ne doit PAS être appliqué ici ; le binaire est déjà instrumenté et sandboxé.
     """
     asan_opts = (
         "detect_leaks=0:"
@@ -158,14 +158,14 @@ def run_asan(
         argv_extra=argv_extra,
         timeout=timeout,
         env_vars={"ASAN_OPTIONS": asan_opts},
-        limit_resources=False,   # ASan needs large virtual address space
+        limit_resources=False,   # ASan nécessite un grand espace d'adressage virtuel
     )
 
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# ── utilitaires ───────────────────────────────────────────────────────────────
 
 def _set_limits() -> None:
-    """Pre-exec: restrict resources to contain hostile binaries."""
+    """Hook pré-exec : restreint les ressources pour contenir les processus fils hostiles."""
     try:
         resource.setrlimit(resource.RLIMIT_AS,   (_AS_LIMIT, _AS_LIMIT))
         resource.setrlimit(resource.RLIMIT_CPU,  (_CPU_LIMIT, _CPU_LIMIT))

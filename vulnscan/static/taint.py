@@ -1,18 +1,18 @@
-"""Intra-procedural taint tracking: source → sink flow detection.
+"""Propagation de teinte intra-procédurale : détection de flux source → sink.
 
-Design decisions and limits
-----------------------------
-- Single-pass linear scan (no CFG): each instruction visited once in order.
-  This over-approximates (union of all paths) → possible false positives.
-- ALL general-purpose registers are tracked in reg_state so 2-step patterns
-  like `lea rax,[rbp-X]; mov rdi,rax` are correctly propagated.
-- Stack slots are tracked by RBP-relative offset; RSP-based indexing and
-  pointer arithmetic through non-rbp registers are not resolved.
-- No inter-procedural analysis: taint does not cross function boundaries.
-- angr is intentionally not used; this is the pure-Python fallback.
+Décisions de conception et limites
+------------------------------------
+- Parcours linéaire en une passe (pas de CFG) : chaque instruction est visitée une fois
+  dans l'ordre. Cela sur-approxime (union de tous les chemins) → faux positifs possibles.
+- TOUS les registres généraux sont suivis dans reg_state, permettant de résoudre
+  correctement les patterns en deux étapes comme `lea rax,[rbp-X]; mov rdi,rax`.
+- Les slots de pile sont suivis par offset RBP-relatif ; l'indexation RSP-base et
+  l'arithmétique de pointeur via des registres non-rbp ne sont pas résolues.
+- Pas d'analyse inter-procédurale : la teinte ne franchit pas les frontières de fonctions.
+- angr n'est intentionnellement pas utilisé ; c'est le repli Python pur.
 
-Sources: functions whose output/destination buffer contains user data.
-Sinks  : functions where tainted arguments constitute a vulnerability.
+Sources : fonctions dont le tampon de sortie/destination contient des données utilisateur.
+Sinks   : fonctions dont les arguments teintés constituent une vulnérabilité.
 """
 
 from __future__ import annotations
@@ -32,46 +32,46 @@ from vulnscan.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
-# Caller-saved registers that are clobbered across calls
+# Registres caller-saved écrasés à travers les appels
 _CALLER_SAVED = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
 
-# Source: arg index whose memory destination is tainted after the call,
-#         or -1 to mean the return value (rax).
+# Source : index de l'argument dont la destination mémoire est teintée après l'appel,
+#          ou -1 pour la valeur de retour (rax).
 _SOURCES: dict[str, int] = {
-    "gets":    0,   # gets(buf)          → buf tainted (rdi)
-    "read":    1,   # read(fd,buf,n)     → buf tainted (rsi)
-    "recv":    1,   # recv(fd,buf,n,f)   → buf tainted (rsi)
-    "fgets":   0,   # fgets(buf,n,fp)    → buf tainted (rdi)
-    "scanf":   0,   # approximate: first non-fmt arg
-    "sscanf":  1,   # approximate
-    "getenv":  -1,  # return value in rax is a tainted pointer
+    "gets":    0,   # gets(buf)          → buf teinté (rdi)
+    "read":    1,   # read(fd,buf,n)     → buf teinté (rsi)
+    "recv":    1,   # recv(fd,buf,n,f)   → buf teinté (rsi)
+    "fgets":   0,   # fgets(buf,n,fp)    → buf teinté (rdi)
+    "scanf":   0,   # approximation : premier argument non-format
+    "sscanf":  1,   # approximation
+    "getenv":  -1,  # valeur de retour dans rax est un pointeur teinté
     "getline": 0,
 }
 
-# Sink: arg indices that — if tainted — constitute a finding.
+# Sink : indices des arguments qui — si teintés — constituent un finding.
 _SINKS: dict[str, list[int]] = {
-    "strcpy":   [1],      # src is dangerous (arg1=rsi)
+    "strcpy":   [1],      # src est dangereux (arg1=rsi)
     "strcat":   [1],
-    "sprintf":  [1],      # format string (arg1=rsi)
+    "sprintf":  [1],      # chaîne de format (arg1=rsi)
     "vsprintf": [1],
-    "printf":   [0],      # format string (arg0=rdi)
-    "fprintf":  [1],      # format string (arg1=rsi)
-    "system":   [0],      # command (arg0=rdi)
+    "printf":   [0],      # chaîne de format (arg0=rdi)
+    "fprintf":  [1],      # chaîne de format (arg1=rsi)
+    "system":   [0],      # commande (arg0=rdi)
     "popen":    [0],
     "execve":   [0],
     "execl":    [0],
-    "memcpy":   [1, 2],   # src and len
+    "memcpy":   [1, 2],   # src et len
     "memmove":  [1, 2],
 }
 
 
 @dataclasses.dataclass
 class _State:
-    # Registers holding tainted values
+    # Registres contenant des valeurs teintées
     regs: set[str] = dataclasses.field(default_factory=set)
-    # RBP-relative stack slots that are tainted
+    # Slots de pile RBP-relatifs teintés
     stack: set[int] = dataclasses.field(default_factory=set)
-    # Full register state: reg → ("imm"|"rbp_rel"|"unknown", value)
+    # État complet des registres : reg → ("imm"|"rbp_rel"|"unknown", valeur)
     regs_val: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
 
 
@@ -98,7 +98,7 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
     return findings
 
 
-# ── per-function tracker ──────────────────────────────────────────────────────
+# ── tracker par fonction ──────────────────────────────────────────────────────
 
 def _track(fn_name: str, insns: list, plt_map: dict[int, str]) -> list[Finding]:
     findings: list[Finding] = []
@@ -161,7 +161,7 @@ def _track(fn_name: str, insns: list, plt_map: dict[int, str]) -> list[Finding]:
                 if breg == "rbp":
                     disp = src.mem.disp
                     st.regs_val[d] = ("rbp_rel", disp)
-                    # Pointer to a tainted stack slot is itself tainted
+                    # Un pointeur vers un slot de pile teinté est lui-même teinté
                     if disp in st.stack:
                         st.regs.add(d)
                     else:
@@ -182,11 +182,11 @@ def _track(fn_name: str, insns: list, plt_map: dict[int, str]) -> list[Finding]:
                 if f:
                     findings.append(f)
 
-            # Clobber caller-saved registers (except rax which sources may set)
+            # Écrase les registres caller-saved (sauf rax que les sources peuvent définir)
             for r in _CALLER_SAVED - {"rax"}:
                 st.regs.discard(r)
                 st.regs_val.pop(r, None)
-            # rax clobbered unless we just set it in _apply_source
+            # rax écrasé sauf si on vient de le définir dans _apply_source
             if callee not in _SOURCES or _SOURCES.get(callee) != -1:
                 st.regs.discard("rax")
                 st.regs_val.pop("rax", None)
@@ -203,14 +203,14 @@ def _apply_source(callee: str, st: _State, call_addr: int) -> None:
     arg_reg = _ARG_REGS[arg_idx]
     buf_type, buf_val = st.regs_val.get(arg_reg, ("unknown", 0))
 
-    # Mark the arg register as tainted (it is the buffer that was filled)
+    # Marque le registre d'argument comme teinté (c'est le tampon qui a été rempli)
     st.regs.add(arg_reg)
-    # Mark the stack slot so LEA-based reloads propagate taint later
+    # Marque le slot de pile pour que les rechargements LEA propagent la teinte
     if buf_type == "rbp_rel":
         st.stack.add(buf_val)
-        logger.debug("taint source %s @ 0x%x: stack[rbp%+d] tainted", callee, call_addr, buf_val)
+        logger.debug("source de teinte %s @ 0x%x : stack[rbp%+d] teinté", callee, call_addr, buf_val)
     else:
-        logger.debug("taint source %s @ 0x%x: %s tainted (offset unknown)", callee, call_addr, arg_reg)
+        logger.debug("source de teinte %s @ 0x%x : %s teinté (offset inconnu)", callee, call_addr, arg_reg)
 
 
 def _check_sink(
@@ -219,9 +219,9 @@ def _check_sink(
     call_addr: int,
     st: _State,
 ) -> Optional[Finding]:
-    # Special case: printf/fprintf with a stack-allocated format string.
-    # Even without inter-procedural taint, a stack buffer as format arg is
-    # almost certainly a format string vulnerability (CWE-134).
+    # Cas particulier : printf/fprintf avec une chaîne de format allouée sur la pile.
+    # Même sans propagation de teinte inter-procédurale, un tampon de pile comme argument
+    # de format est presque toujours une vulnérabilité de chaîne de format (CWE-134).
     fmt_finding = _check_stack_format_string(caller, callee, call_addr, st)
     if fmt_finding:
         return fmt_finding
@@ -251,7 +251,7 @@ def _check_sink(
         confidence="static",
         analysis="static",
         evidence=(
-            f"tainted user-input flows into {callee}({arg_desc}) at 0x{call_addr:x}"
+            f"entrée utilisateur teintée vers {callee}({arg_desc}) à 0x{call_addr:x}"
         ),
         cwe=_sink_cwe(callee),
     )
@@ -263,10 +263,10 @@ def _check_stack_format_string(
     call_addr: int,
     st: _State,
 ) -> Optional[Finding]:
-    """Detect printf/fprintf where the format arg is a stack buffer (not .rodata).
+    """Détecte printf/fprintf dont l'argument format est un tampon de pile (pas .rodata).
 
-    This catches the common `printf(buf)` pattern even without taint propagation
-    across function calls, because any stack-allocated format string is suspicious.
+    Capture le pattern courant `printf(buf)` même sans propagation de teinte inter-procédurale,
+    car tout tampon de pile comme chaîne de format est suspect.
     """
     fmt_sinks = {
         "printf":  0,   # format = arg0 (rdi)
@@ -279,7 +279,7 @@ def _check_stack_format_string(
     fmt_reg = _ARG_REGS[fmt_arg_idx]
     rtype, rval = st.regs_val.get(fmt_reg, ("unknown", 0))
 
-    # A stack-allocated format string: the register holds an RBP-relative address
+    # Chaîne de format allouée sur la pile : le registre contient une adresse RBP-relative
     if rtype != "rbp_rel":
         return None
 
@@ -291,15 +291,15 @@ def _check_stack_format_string(
         confidence="static",
         analysis="static",
         evidence=(
-            f"{callee}() called with stack-allocated format string "
-            f"(arg{fmt_arg_idx}={fmt_reg} → [rbp{rval:+d}]) at 0x{call_addr:x} "
-            f"— likely user-controlled if buf was filled by fgets/read/gets"
+            f"{callee}() appelé avec une chaîne de format allouée sur la pile "
+            f"(arg{fmt_arg_idx}={fmt_reg} → [rbp{rval:+d}]) à 0x{call_addr:x} "
+            f"— probablement contrôlée par l'utilisateur si buf rempli par fgets/read/gets"
         ),
         cwe="CWE-134",
     )
 
 
-# ── utilities ─────────────────────────────────────────────────────────────────
+# ── utilitaires ───────────────────────────────────────────────────────────────
 
 def _exec_sections(binary) -> list[tuple[int, int, bytes]]:
     result = []

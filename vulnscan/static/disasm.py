@@ -1,13 +1,13 @@
-"""Frame-size analysis and buffer-vs-length inconsistency detection.
+"""Analyse de taille de frame et détection d'incohérences tampon/longueur.
 
-For each function:
-  1. Locate the frame allocation (sub rsp, N) to get total frame size.
-  2. Track LEA/MOV for ALL registers (not just arg regs) so that 2-step
-     patterns like `lea rax,[rbp-0x40]; mov rdi,rax` are resolved.
-  3. Derive the buffer's available size from its RBP-relative offset.
-  4. For calls where a length argument is visible (read/memcpy/fgets),
-     compare it against the buffer size and flag inconsistencies.
-  5. For unbounded calls (gets, strcpy), always flag.
+Pour chaque fonction :
+  1. Localise l'allocation de frame (sub rsp, N) pour obtenir la taille totale.
+  2. Suit LEA/MOV pour TOUS les registres (pas seulement les registres d'arguments)
+     afin de résoudre les patterns en deux étapes comme `lea rax,[rbp-0x40]; mov rdi,rax`.
+  3. Déduit la taille disponible du tampon depuis son offset RBP-relatif.
+  4. Pour les appels avec un argument longueur visible (read/memcpy/fgets),
+     compare avec la taille du tampon et signale les incohérences.
+  5. Pour les appels non bornés (gets, strcpy), signale toujours.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 _ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
 
-# callee → (buf_arg_idx, len_arg_idx); len_arg_idx=None means unbounded
+# callee → (idx_arg_buf, idx_arg_len) ; idx_arg_len=None signifie non borné
 _SINK_ARGS: dict[str, tuple[int, Optional[int]]] = {
     "gets":     (0, None),
     "strcpy":   (0, None),
@@ -67,7 +67,7 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
     return findings
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── fonctions utilitaires ─────────────────────────────────────────────────────
 
 def _exec_sections(binary) -> list[tuple[int, int, bytes]]:
     result = []
@@ -108,7 +108,7 @@ def _analyze_fn(
     plt_map: dict[int, str],
 ) -> list[Finding]:
     findings: list[Finding] = []
-    # reg_state: reg_name → ("imm", value) | ("rbp_rel", disp) | ("unknown", 0)
+    # reg_state : nom_reg → ("imm", valeur) | ("rbp_rel", dépl) | ("unknown", 0)
     reg_state: dict[str, tuple[str, int]] = {}
 
     for insn in insns:
@@ -143,7 +143,7 @@ def _analyze_fn(
                 f = _check_call(fn_name, callee, insn.address, reg_state, frame_size)
                 if f:
                     findings.append(f)
-            # Caller-saved regs are clobbered after any call
+            # Les registres caller-saved sont écrasés après tout appel
             for r in ("rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"):
                 reg_state.pop(r, None)
 
@@ -165,15 +165,15 @@ def _check_call(
     if buf_type == "rbp_rel" and buf_val < 0:
         buf_space = abs(buf_val)
 
-    # ── Unbounded callee ──────────────────────────────────────────────────────
+    # ── Callee non borné ──────────────────────────────────────────────────────
     if len_arg_idx is None:
         if buf_space is not None:
             evidence = (
-                f"{callee}() writes unbounded data into "
-                f"buf@[rbp{buf_val:+d}] ({buf_space}B available in {frame_size}B frame)"
+                f"{callee}() écrit des données non bornées dans "
+                f"buf@[rbp{buf_val:+d}] ({buf_space} octets disponibles sur {frame_size} octets de frame)"
             )
         else:
-            evidence = f"{callee}() writes unbounded data (buffer address not statically resolved)"
+            evidence = f"{callee}() écrit des données non bornées (adresse du tampon non résolue statiquement)"
         return Finding(
             vuln_class=VulnClass.STACK_BOF,
             function=caller,
@@ -185,14 +185,14 @@ def _check_call(
             cwe="CWE-121",
         )
 
-    # ── Callee with explicit length ───────────────────────────────────────────
+    # ── Callee avec longueur explicite ────────────────────────────────────────
     len_reg = _ARG_REGS[len_arg_idx]
     len_type, len_val = reg_state.get(len_reg, ("unknown", 0))
 
     if len_type == "imm" and buf_space is not None and len_val > buf_space:
         evidence = (
-            f"{callee}() length={len_val} > buf_size={buf_space} "
-            f"(buf@[rbp{buf_val:+d}], frame={frame_size}B) at 0x{call_addr:x}"
+            f"{callee}() longueur={len_val} > taille_buf={buf_space} "
+            f"(buf@[rbp{buf_val:+d}], frame={frame_size} octets) à 0x{call_addr:x}"
         )
         return Finding(
             vuln_class=_vc(callee),
@@ -205,18 +205,18 @@ def _check_call(
             cwe="CWE-121" if _vc(callee) == VulnClass.STACK_BOF else "CWE-122",
         )
 
-    # Length is non-constant (from register/stack variable — likely user-controlled)
+    # Longueur non constante (depuis registre/variable de pile — probablement contrôlée par l'utilisateur)
     if len_type in ("unknown", "rbp_rel"):
         if buf_space is not None:
             evidence = (
-                f"{callee}() called with non-constant length (reg={len_reg}, "
-                f"type={len_type}) into buf@[rbp{buf_val:+d}] ({buf_space}B) — may overflow"
+                f"{callee}() appelé avec longueur non constante (reg={len_reg}, "
+                f"type={len_type}) dans buf@[rbp{buf_val:+d}] ({buf_space} octets) — débordement possible"
             )
         else:
-            # Heap buffer (malloc return stored in stack then loaded) — no static size
+            # Tampon heap (retour malloc stocké sur pile puis chargé) — pas de taille statique
             evidence = (
-                f"{callee}() called with non-constant length (reg={len_reg}, "
-                f"type={len_type}) — buffer size unknown (heap?), length may exceed allocation"
+                f"{callee}() appelé avec longueur non constante (reg={len_reg}, "
+                f"type={len_type}) — taille du tampon inconnue (heap ?), longueur peut dépasser l'allocation"
             )
         return Finding(
             vuln_class=_vc(callee),

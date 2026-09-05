@@ -1,10 +1,10 @@
-"""Report generator: JSON serialisation + Jinja2 HTML rendering.
+"""Générateur de rapports : sérialisation JSON + rendu HTML via Jinja2.
 
-Entry points
-------------
-render_json(result)  → str   (pretty-printed JSON)
-render_html(result)  → str   (self-contained HTML, no external assets)
-save(result, path, *, html=False)  → saves JSON and optionally HTML
+Points d'entrée
+---------------
+render_json(result)  → str   (JSON indenté)
+render_html(result)  → str   (HTML autonome, sans ressources externes)
+save(result, path)   → écrit le rapport HTML sur le disque
 """
 
 from __future__ import annotations
@@ -21,18 +21,18 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 # ── JSON ──────────────────────────────────────────────────────────────────────
 
 def render_json(result: "ScanResult") -> str:
-    """Serialise *result* to a pretty-printed JSON string."""
+    """Sérialise *result* en JSON indenté."""
     return json.dumps(result.as_dict(), indent=2, ensure_ascii=False)
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
 def render_html(result: "ScanResult") -> str:
-    """Render *result* to a self-contained HTML string via Jinja2."""
+    """Génère le rapport HTML complet à partir de *result* via Jinja2."""
     try:
         import jinja2
     except ImportError as exc:
-        raise ImportError("jinja2 is required for HTML reports: pip install jinja2") from exc
+        raise ImportError("jinja2 est requis pour les rapports HTML : pip install jinja2") from exc
 
     loader = jinja2.FileSystemLoader(str(_TEMPLATES_DIR))
     env = jinja2.Environment(
@@ -41,7 +41,7 @@ def render_html(result: "ScanResult") -> str:
         trim_blocks=True,
         lstrip_blocks=True,
     )
-    # Custom filters
+    # Filtres personnalisés
     env.filters["severity_class"] = _severity_class
     env.filters["protection_label"] = _protection_label
     env.filters["vuln_explain"] = _vuln_explain
@@ -67,14 +67,14 @@ def render_html(result: "ScanResult") -> str:
     )
 
 
-# ── save helper ───────────────────────────────────────────────────────────────
+# ── sauvegarde ────────────────────────────────────────────────────────────────
 
 def save(result: "ScanResult", path: Path) -> None:
-    """Write the HTML report to *path*."""
+    """Écrit le rapport HTML dans *path*."""
     Path(path).write_text(render_html(result), encoding="utf-8")
 
 
-# ── template filters ──────────────────────────────────────────────────────────
+# ── filtres de template ───────────────────────────────────────────────────────
 
 def _severity_order(sev) -> int:
     from vulnscan.report.model import Severity
@@ -98,7 +98,7 @@ def _severity_class(sev_value: str) -> str:
 
 
 def _protection_label(value) -> str:
-    """Return 'yes' / 'no' / the string itself for relro."""
+    """Retourne 'yes' / 'no' pour les booléens, la valeur brute sinon."""
     if isinstance(value, bool):
         return "yes" if value else "no"
     return str(value)
@@ -136,12 +136,12 @@ def _vuln_explain(vuln_class_value: str) -> str:
     return _VULN_EXPLAIN.get(str(vuln_class_value), "")
 
 
-# ── impact analysis ───────────────────────────────────────────────────────────
+# ── analyse d'impact ──────────────────────────────────────────────────────────
 
 def _compute_impact(result: "ScanResult") -> list[dict]:
-    """Build a list of protection-impact items for the HTML report.
+    """Génère la liste des items d'impact pour la section exploitabilité du rapport HTML.
 
-    Each item: {"level": "critical|high|medium|good", "title": str, "description": str}
+    Chaque item : {"level": "critical|high|medium|good", "title": str, "description": str}
     """
     from vulnscan.report.model import VulnClass
 
@@ -153,169 +153,169 @@ def _compute_impact(result: "ScanResult") -> list[dict]:
                                     VulnClass.OFF_BY_ONE})
     has_fmt       = VulnClass.FORMAT_STRING in classes
     has_uaf       = VulnClass.USE_AFTER_FREE in classes
-    aslr_weak     = p.aslr in ("disabled", "partial", "unknown")
 
     items: list[dict] = []
 
-    # ── missing protections ──────────────────────────────────────────────────
+    # ── protections absentes ──────────────────────────────────────────────────
     if not p.canary and has_stack_bof:
         items.append({
             "level": "critical",
-            "title": "No stack canary — return address unprotected",
+            "title": "Pas de stack canary — adresse de retour non protégée",
             "description": (
-                "Stack buffer overflow and off-by-one vulnerabilities can directly overwrite "
-                "the saved return address without triggering any runtime check. "
-                "Exploitation is straightforward once the stack offset to RIP is known."
+                "Les dépassements de tampon sur la pile et les vulnérabilités off-by-one peuvent "
+                "écraser directement l'adresse de retour sauvegardée sans déclencher aucune "
+                "vérification. L'exploitation est directe une fois l'offset vers RIP connu."
             ),
         })
 
     if not p.nx and has_any_bof:
         items.append({
             "level": "critical",
-            "title": "NX disabled — stack and heap are executable",
+            "title": "NX désactivé — pile et tas exécutables",
             "description": (
-                "Memory regions holding user data (stack, heap) are executable. "
-                "Buffer overflow vulnerabilities allow injecting arbitrary shellcode "
-                "and executing it directly, without requiring ROP chains."
+                "Les régions mémoire contenant des données utilisateur (pile, tas) sont exécutables. "
+                "Les vulnérabilités de dépassement de tampon permettent d'injecter du shellcode "
+                "arbitraire et de l'exécuter directement, sans recourir à des chaînes ROP."
             ),
         })
 
     if not p.pie and p.aslr == "disabled":
         items.append({
             "level": "critical",
-            "title": "No PIE + ASLR disabled — all addresses are fixed",
+            "title": "Pas de PIE + ASLR désactivé — toutes les adresses sont fixes",
             "description": (
-                "The binary is loaded at a fixed base address and ASLR is disabled "
-                "system-wide. Every code gadget, libc function and GOT entry is at a "
-                "deterministic address. Exploitation requires no information leak."
+                "Le binaire est chargé à une adresse de base fixe et l'ASLR est désactivé au "
+                "niveau système. Chaque gadget de code, fonction libc et entrée GOT se trouve à "
+                "une adresse déterministe. L'exploitation ne nécessite aucune fuite d'information."
             ),
         })
     elif not p.pie:
         items.append({
             "level": "high",
-            "title": "No PIE — binary code at a fixed address",
+            "title": "Pas de PIE — code binaire à adresse fixe",
             "description": (
-                "The binary is not compiled as position-independent (no PIE). Its code "
-                "segment, GOT and PLT are at fixed, predictable addresses. Even with ASLR "
-                "active on the system, ROP gadgets from the binary itself are usable "
-                "without any memory disclosure."
+                "Le binaire n'est pas compilé comme indépendant de la position (pas de PIE). Son "
+                "segment de code, sa GOT et sa PLT sont à des adresses fixes et prévisibles. "
+                "Même avec l'ASLR actif, les gadgets ROP du binaire lui-même sont exploitables "
+                "sans fuite mémoire."
             ),
         })
 
     if p.aslr == "disabled":
         items.append({
             "level": "critical",
-            "title": "ASLR disabled system-wide",
+            "title": "ASLR désactivé au niveau système",
             "description": (
-                "Address Space Layout Randomization is turned off at the kernel level "
-                "(/proc/sys/kernel/randomize_va_space = 0). Stack, heap and all shared "
-                "libraries load at the same addresses on every run, eliminating the need "
-                "for an info-leak to build a reliable exploit."
+                "La randomisation de l'espace d'adressage est désactivée au niveau noyau "
+                "(/proc/sys/kernel/randomize_va_space = 0). La pile, le tas et toutes les "
+                "bibliothèques partagées se chargent aux mêmes adresses à chaque exécution, "
+                "éliminant le besoin d'une fuite d'information pour construire un exploit fiable."
             ),
         })
     elif p.aslr == "partial":
         items.append({
             "level": "medium",
-            "title": "ASLR partial — stack and heap randomised, not the binary",
+            "title": "ASLR partiel — pile et tas aléatoires, pas le binaire",
             "description": (
-                "ASLR is active but only randomises the stack and heap "
-                "(/proc/sys/kernel/randomize_va_space = 1). Without PIE the binary code "
-                "segment remains at a fixed address. Shared libraries may still be "
-                "partially predictable."
+                "L'ASLR est actif mais ne randomise que la pile et le tas "
+                "(/proc/sys/kernel/randomize_va_space = 1). Sans PIE, le segment de code du "
+                "binaire reste à adresse fixe. Les bibliothèques partagées peuvent rester "
+                "partiellement prévisibles."
             ),
         })
 
     if p.relro != "full" and has_fmt:
-        label = "No RELRO" if p.relro == "no" else "Partial RELRO"
+        label = "Pas de RELRO" if p.relro == "no" else "RELRO partiel"
         items.append({
             "level": "critical" if p.relro == "no" else "high",
-            "title": f"{label} — GOT entries are writable",
+            "title": f"{label} — entrées GOT accessibles en écriture",
             "description": (
-                "The Global Offset Table (GOT) is not made read-only after startup. "
-                "Format string vulnerabilities can use %n writes to overwrite GOT entries "
-                "and redirect any subsequent library call (e.g. printf → system) to "
-                "attacker-controlled code."
+                "La table des adresses globales (GOT) n'est pas passée en lecture seule après "
+                "le démarrage. Les vulnérabilités de chaîne de format peuvent utiliser des "
+                "écritures %n pour écraser des entrées GOT et rediriger tout appel de bibliothèque "
+                "ultérieur (ex. printf → system) vers du code contrôlé par l'attaquant."
             ),
         })
 
     if not p.fortify and has_any_bof:
         items.append({
             "level": "medium",
-            "title": "No Fortify Source — no runtime bounds checking",
+            "title": "Pas de Fortify Source — aucune vérification de bornes à l'exécution",
             "description": (
-                "The binary was not compiled with _FORTIFY_SOURCE. Safe variants of "
-                "string/memory functions (__strcpy_chk, __sprintf_chk, etc.) are absent, "
-                "so no runtime buffer size checks supplement the missing compile-time "
-                "protections."
+                "Le binaire n'a pas été compilé avec _FORTIFY_SOURCE. Les variantes sécurisées "
+                "des fonctions de chaînes/mémoire (__strcpy_chk, __sprintf_chk, etc.) sont "
+                "absentes, aucune vérification de taille de tampon à l'exécution ne complète "
+                "les protections de compilation manquantes."
             ),
         })
 
     if has_uaf and not p.pie:
         items.append({
             "level": "high",
-            "title": "Use-after-free with fixed addresses",
+            "title": "Use-after-free avec adresses fixes",
             "description": (
-                "A use-after-free vulnerability was detected. Without PIE, heap allocator "
-                "metadata and freed chunk addresses are more predictable, facilitating "
-                "heap grooming and type confusion attacks."
+                "Une vulnérabilité use-after-free a été détectée. Sans PIE, les métadonnées de "
+                "l'allocateur de tas et les adresses de chunks libérés sont plus prévisibles, "
+                "facilitant le heap grooming et les attaques par confusion de types."
             ),
         })
 
-    # ── active protections ───────────────────────────────────────────────────
+    # ── protections actives ───────────────────────────────────────────────────
     if p.canary:
         items.append({
             "level": "good",
-            "title": "Stack canary active",
+            "title": "Stack canary actif",
             "description": (
-                "A secret cookie is placed between local variables and the saved return "
-                "address. Any stack overflow that reaches the return address corrupts the "
-                "canary and triggers process termination before the overflow is exploited. "
-                "Overflows that do not reach the return address (e.g. off-by-one into "
-                "adjacent variables) may still be exploitable."
+                "Un cookie secret est placé entre les variables locales et l'adresse de retour "
+                "sauvegardée. Tout dépassement de pile qui l'atteint corrompt le canary et "
+                "déclenche l'arrêt du processus avant exploitation. Les dépassements n'atteignant "
+                "pas l'adresse de retour (ex. off-by-one sur variables adjacentes) peuvent "
+                "rester exploitables."
             ),
         })
 
     if p.nx:
         items.append({
             "level": "good",
-            "title": "NX active — data regions are non-executable",
+            "title": "NX actif — régions de données non exécutables",
             "description": (
-                "The stack and heap are marked non-executable. Direct shellcode injection "
-                "is prevented; an attacker must use code-reuse techniques (ROP/ret2libc) "
-                "to achieve arbitrary code execution."
+                "La pile et le tas sont marqués non exécutables. L'injection directe de shellcode "
+                "est bloquée ; un attaquant doit recourir à des techniques de réutilisation de "
+                "code (ROP/ret2libc) pour obtenir une exécution de code arbitraire."
             ),
         })
 
     if p.pie and p.aslr == "full":
         items.append({
             "level": "good",
-            "title": "PIE + ASLR (full randomisation)",
+            "title": "PIE + ASLR (randomisation complète)",
             "description": (
-                "The binary is compiled as position-independent and ASLR is fully active. "
-                "Code, stack, heap and shared libraries are randomised on each execution. "
-                "Reliable exploitation requires an information-leak vulnerability to "
-                "discover runtime addresses before building an exploit."
+                "Le binaire est compilé comme indépendant de la position et l'ASLR est "
+                "entièrement actif. Le code, la pile, le tas et les bibliothèques partagées sont "
+                "aléatoires à chaque exécution. Un exploit fiable nécessite une fuite d'information "
+                "pour découvrir les adresses à l'exécution."
             ),
         })
     elif p.pie:
         items.append({
             "level": "good",
-            "title": "PIE enabled",
+            "title": "PIE activé",
             "description": (
-                "The binary is compiled as position-independent. When combined with ASLR, "
-                "the code segment base is randomised, making ROP chain construction "
-                "significantly harder without a separate info-leak."
+                "Le binaire est compilé comme indépendant de la position. Combiné à l'ASLR, "
+                "la base du segment de code est aléatoire, rendant la construction de chaînes "
+                "ROP significativement plus difficile sans fuite mémoire séparée."
             ),
         })
 
     if p.relro == "full":
         items.append({
             "level": "good",
-            "title": "Full RELRO — GOT is read-only",
+            "title": "RELRO complet — GOT en lecture seule",
             "description": (
-                "All dynamic symbols are resolved at startup and the GOT is remapped "
-                "read-only. GOT-overwrite attacks via format string or buffer overflow "
-                "will trigger a segfault rather than redirecting execution."
+                "Tous les symboles dynamiques sont résolus au démarrage et la GOT est remappée "
+                "en lecture seule. Les attaques par écrasement de GOT via chaîne de format ou "
+                "dépassement de tampon déclencheront un segfault plutôt que de rediriger "
+                "l'exécution."
             ),
         })
 

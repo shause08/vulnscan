@@ -1,11 +1,11 @@
-"""Detect calls to dangerous/unsafe C functions.
+"""Détection des appels à des fonctions C dangereuses/non sécurisées.
 
-Strategy:
-  1. Check PLT imports for known dangerous function names.
-  2. Use the plt_map built by elf_info (stub_addr → name) to locate call sites:
-     disassemble every executable section with capstone and find CALL instructions
-     whose target address is a known PLT stub.
-  3. Emit one Finding per unique (calling_function, dangerous_callee) pair.
+Stratégie :
+  1. Vérifie les imports PLT pour les noms de fonctions dangereuses connus.
+  2. Utilise la plt_map construite par elf_info (adresse_stub → nom) pour localiser
+     les sites d'appel : désassemble chaque section exécutable avec capstone et
+     trouve les instructions CALL dont la cible est un stub PLT dangereux.
+  3. Émet un Finding par paire unique (fonction_appelante, callee_dangereux).
 """
 
 from __future__ import annotations
@@ -35,56 +35,55 @@ class DangerousFunc:
 
 _CATALOGUE: list[DangerousFunc] = [
     DangerousFunc("gets",     VulnClass.STACK_BOF,     Severity.CRITICAL,
-                  "reads unbounded input into stack buffer", "CWE-121"),
+                  "lit une entrée non bornée dans un tampon de pile", "CWE-121"),
     DangerousFunc("strcpy",   VulnClass.STACK_BOF,     Severity.HIGH,
-                  "copies string with no length check", "CWE-121"),
+                  "copie une chaîne sans vérification de longueur", "CWE-121"),
     DangerousFunc("strcat",   VulnClass.STACK_BOF,     Severity.HIGH,
-                  "concatenates string with no length check", "CWE-121"),
+                  "concatène une chaîne sans vérification de longueur", "CWE-121"),
     DangerousFunc("sprintf",  VulnClass.STACK_BOF,     Severity.HIGH,
-                  "formats into fixed buffer with no length limit", "CWE-121"),
+                  "formate dans un tampon fixe sans limite de longueur", "CWE-121"),
     DangerousFunc("vsprintf", VulnClass.STACK_BOF,     Severity.HIGH,
-                  "formats into fixed buffer with no length limit", "CWE-121"),
+                  "formate dans un tampon fixe sans limite de longueur", "CWE-121"),
     DangerousFunc("scanf",    VulnClass.STACK_BOF,     Severity.MEDIUM,
-                  "may read unbounded string with %%s", "CWE-121"),
+                  "peut lire une chaîne non bornée avec %%s", "CWE-121"),
     DangerousFunc("sscanf",   VulnClass.STACK_BOF,     Severity.MEDIUM,
-                  "may read unbounded string with %%s", "CWE-121"),
+                  "peut lire une chaîne non bornée avec %%s", "CWE-121"),
     DangerousFunc("memcpy",   VulnClass.HEAP_BOF,      Severity.MEDIUM,
-                  "copies user-controlled length — no bounds guard", "CWE-122"),
+                  "copie une longueur contrôlée par l'utilisateur — sans garde de borne", "CWE-122"),
     DangerousFunc("memmove",  VulnClass.HEAP_BOF,      Severity.MEDIUM,
-                  "moves user-controlled length — no bounds guard", "CWE-122"),
-    DangerousFunc("printf",   VulnClass.FORMAT_STRING, Severity.HIGH,
-                  "direct call — first argument may be user-controlled", "CWE-134"),
-    DangerousFunc("fprintf",  VulnClass.FORMAT_STRING, Severity.HIGH,
-                  "direct call — format argument may be user-controlled", "CWE-134"),
+                  "déplace une longueur contrôlée par l'utilisateur — sans garde de borne", "CWE-122"),
+    # printf/fprintf : détection déléguée à l'analyse de teinte (taint.py)
+    # qui vérifie réellement si l'argument de format est contrôlé par l'utilisateur.
+    # Les inclure ici génère un faux positif sur tout binaire qui affiche du texte.
     DangerousFunc("system",   VulnClass.STACK_BOF,     Severity.CRITICAL,
-                  "executes shell command — dangerous if argument is tainted", "CWE-78"),
+                  "exécute une commande shell — dangereux si l'argument est contaminé", "CWE-78"),
     DangerousFunc("popen",    VulnClass.STACK_BOF,     Severity.CRITICAL,
-                  "opens a pipe to a shell command", "CWE-78"),
+                  "ouvre un tube vers une commande shell", "CWE-78"),
     DangerousFunc("alloca",   VulnClass.STACK_BOF,     Severity.MEDIUM,
-                  "stack allocation with user-controlled size", "CWE-121"),
+                  "allocation de pile avec taille contrôlée par l'utilisateur", "CWE-121"),
     DangerousFunc("read",     VulnClass.HEAP_BOF,      Severity.MEDIUM,
-                  "reads user-controlled number of bytes — dangerous if len > buffer", "CWE-122"),
+                  "lit un nombre d'octets contrôlé par l'utilisateur — dangereux si len > tampon", "CWE-122"),
     DangerousFunc("recv",     VulnClass.HEAP_BOF,      Severity.MEDIUM,
-                  "reads user-controlled number of bytes from socket", "CWE-122"),
+                  "lit un nombre d'octets contrôlé par l'utilisateur depuis une socket", "CWE-122"),
 ]
 
 _CATALOGUE_MAP: dict[str, DangerousFunc] = {d.name: d for d in _CATALOGUE}
 
 
 def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
-    """Return static Findings for dangerous function usage."""
+    """Retourne les Findings statiques pour l'utilisation de fonctions dangereuses."""
     findings: list[Finding] = []
 
     imported_names = elf_info.import_names()
     dangerous_imported = {n for n in imported_names if n in _CATALOGUE_MAP}
 
     if not dangerous_imported:
-        logger.debug("%s: no dangerous imports", binary_path.name)
+        logger.debug("%s : aucun import dangereux", binary_path.name)
         return findings
 
-    logger.debug("%s: dangerous imports: %s", binary_path.name, ", ".join(sorted(dangerous_imported)))
+    logger.debug("%s : imports dangereux : %s", binary_path.name, ", ".join(sorted(dangerous_imported)))
 
-    # Restrict plt_map to dangerous functions only
+    # Restreint plt_map aux seules fonctions dangereuses
     dangerous_plt: dict[int, str] = {
         addr: name
         for addr, name in elf_info.plt_map.items()
@@ -116,11 +115,11 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
                     severity=info.severity,
                     confidence="static",
                     analysis="static",
-                    evidence=f"calls {callee_name}() at [{addr_list}] — {info.reason}",
+                    evidence=f"appel à {callee_name}() en [{addr_list}] — {info.reason}",
                     cwe=info.cwe,
                 ))
         else:
-            # Import visible but call site not resolved (stripped / indirect call)
+            # Import visible mais site d'appel non résolu (binaire strippé / appel indirect)
             key = (callee_name, "<import>")
             if key not in emitted:
                 emitted.add(key)
@@ -132,7 +131,7 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
                     confidence="static",
                     analysis="static",
                     evidence=(
-                        f"{callee_name} in PLT imports (call site not resolved) "
+                        f"{callee_name} dans les imports PLT (site d'appel non résolu) "
                         f"— {info.reason}"
                     ),
                     cwe=info.cwe,
@@ -146,7 +145,7 @@ def _find_call_sites(
     elf_info: ELFInfo,
     dangerous_plt: dict[int, str],
 ) -> dict[str, list[tuple[int, str]]]:
-    """Disassemble executable sections; collect CALL sites targeting dangerous PLT stubs."""
+    """Désassemble les sections exécutables ; collecte les sites CALL ciblant des stubs PLT dangereux."""
     if not dangerous_plt:
         return {}
 

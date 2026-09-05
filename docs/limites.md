@@ -21,7 +21,8 @@ L'analyse ne suit pas les allocations et libérations de mémoire dynamique. Les
 
 ### Faux positifs sur les chaînes de format
 
-L'heuristique `rbp_rel` pour les chaînes de format génère des faux positifs quand :
+`printf` et `fprintf` ne sont pas dans le catalogue de fonctions dangereuses pour éviter de signaler tout binaire qui affiche du texte. La détection repose sur l'heuristique `rbp_rel` (taint.py) : si l'argument de format est un buffer sur la frame courante, il est suspect. Cette heuristique génère des faux positifs quand :
+
 - Une chaîne de format constante est stockée dans une variable locale puis passée à `printf` (pattern courant mais non dangereux).
 - Le format argument est un buffer initialisé depuis `.rodata` mais copié sur la pile.
 
@@ -49,9 +50,11 @@ La majorité des stratégies de fuzzing ciblent stdin. Les vulnérabilités déc
 
 ... nécessitent une instrumentation supplémentaire hors scope de ce projet. Exception partielle : la stratégie `integer_boundary` passe `argv_extra` pour les binaires qui attendent un count en argument.
 
-### Détection UAF conditionnelle
+### Détection UAF et off-by-one silencieux
 
-Les vulnérabilités UAF ne produisent un crash immédiat dans glibc qu'en présence d'ASan. Sans le build `*_asan`, un use-after-free peut silencieusement utiliser de la mémoire recyclée sans SIGSEGV. vulnscan dépend donc de la disponibilité du binaire ASan juxtaposé.
+Les vulnérabilités UAF ne produisent un crash immédiat dans glibc qu'en présence d'ASan. Sans le build `*_asan`, un use-after-free peut silencieusement utiliser de la mémoire recyclée sans SIGSEGV. De même, un off-by-one qui n'écrase que l'octet de poids faible du saved RBP ne provoque pas de crash dans le binaire non instrumenté.
+
+vulnscan atténue cette limite via les **entrées baseline ASan** (`b""`, 63-129 octets) qui sont toujours soumises au binaire ASan même sans crash du fuzzer. Cependant, si le build `*_asan` est absent, ces bugs ne sont pas détectés.
 
 ### Heap overflow sans crash immédiat
 

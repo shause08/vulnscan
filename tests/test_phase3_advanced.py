@@ -31,7 +31,7 @@ class TestDisasm:
         assert findings, "Expected at least one disasm finding for stack_bof"
         ev = " ".join(f.evidence for f in findings)
         assert "gets" in ev
-        assert "unbounded" in ev
+        assert "non bornée" in ev or "unbounded" in ev
 
     def test_stack_bof_finds_vulnerable_function(self):
         findings = self._analyze("stack_bof_vuln")
@@ -48,7 +48,7 @@ class TestDisasm:
         assert findings, "Expected disasm finding for heap_bof (read with variable len)"
         ev = " ".join(f.evidence for f in findings)
         assert "read" in ev
-        assert "non-constant" in ev
+        assert "non constante" in ev or "non-constant" in ev
 
     def test_integer_overflow_memcpy_non_constant_len(self):
         findings = self._analyze("integer_overflow_vuln")

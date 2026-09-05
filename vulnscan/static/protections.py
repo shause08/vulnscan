@@ -1,6 +1,6 @@
-"""Binary protection detection (checksec).
+"""Détection des protections binaires (checksec).
 
-Cross-checks pwntools ELF.checksec() with our own lief-based reading.
+Croise les résultats de pwntools ELF.checksec() avec notre propre lecture lief.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ context.log_level = "error"
 
 
 def detect(binary_path: Path) -> Protection:
-    """Return a Protection dataclass for *binary_path*."""
+    """Retourne un dataclass Protection pour *binary_path*."""
     lief_result = _lief_checksec(binary_path)
     pwn_result  = _pwntools_checksec(binary_path)
 
@@ -44,7 +44,7 @@ def detect(binary_path: Path) -> Protection:
         fortify=fortify, rpath=rpath,
         aslr=_detect_aslr(),
     )
-    logger.debug("protections for %s: %s", binary_path.name, prot)
+    logger.debug("protections pour %s : %s", binary_path.name, prot)
     return prot
 
 
@@ -54,7 +54,7 @@ def _lief_checksec(binary_path: Path) -> dict:
     if binary is None:
         return result
 
-    # NX: GNU_STACK without execute flag
+    # NX : segment GNU_STACK sans le flag exécutable
     for seg in binary.segments:
         if seg.type == ELFT.Segment.TYPE.GNU_STACK:
             result["nx"] = not bool(int(seg.flags) & int(ELFT.Segment.FLAGS.X))
@@ -96,7 +96,7 @@ def _has_flag_now(binary: lief.ELF.Binary) -> bool:
 
 
 def _detect_aslr() -> str:
-    """Read system ASLR level from /proc/sys/kernel/randomize_va_space."""
+    """Lit le niveau ASLR système depuis /proc/sys/kernel/randomize_va_space."""
     try:
         val = Path("/proc/sys/kernel/randomize_va_space").read_text().strip()
         return {"0": "disabled", "1": "partial", "2": "full"}.get(val, "unknown")
@@ -121,5 +121,5 @@ def _pwntools_checksec(binary_path: Path) -> dict:
         else:
             result["relro"] = "partial"
     except Exception as exc:
-        logger.debug("pwntools checksec failed for %s: %s", binary_path.name, exc)
+        logger.debug("pwntools checksec échoué pour %s : %s", binary_path.name, exc)
     return result

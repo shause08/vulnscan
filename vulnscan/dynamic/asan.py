@@ -1,10 +1,10 @@
-"""AddressSanitizer output parser.
+"""Analyseur de sortie AddressSanitizer.
 
-Parses the stderr of ASan-instrumented binaries and maps each error type to
-a VulnClass + rich Finding with the call stack as evidence.
+Analyse le stderr des binaires instrumentés par ASan et mappe chaque type d'erreur
+vers une VulnClass + un Finding enrichi avec la pile d'appel en preuve.
 
-Supported ASan error types
---------------------------
+Types d'erreurs ASan supportés
+-------------------------------
   stack-buffer-overflow
   heap-buffer-overflow
   heap-use-after-free
@@ -27,7 +27,7 @@ from vulnscan.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ── ASan error type → (VulnClass, base_severity) ────────────────────────────
+# ── type d'erreur ASan → (VulnClass, sévérité_de_base) ─────────────────────
 
 _TYPE_MAP: dict[str, tuple[VulnClass, Severity]] = {
     "stack-buffer-overflow":    (VulnClass.STACK_BOF,      Severity.HIGH),
@@ -41,22 +41,40 @@ _TYPE_MAP: dict[str, tuple[VulnClass, Severity]] = {
     "alloc-dealloc-mismatch":   (VulnClass.USE_AFTER_FREE,  Severity.MEDIUM),
     "attempting free on address which was not malloc()-ed":
                                 (VulnClass.USE_AFTER_FREE,  Severity.MEDIUM),
-    # Segfault triggered by format-string %s / %n — the crash IS the bug
+    # Segfault déclenché par %s / %n d'une format string — le crash EST le bug
     "segv":                     (VulnClass.UNKNOWN,         Severity.MEDIUM),
     "deadly signal":            (VulnClass.STACK_BOF,       Severity.HIGH),
 }
 
-# ── Regex patterns ────────────────────────────────────────────────────────────
+# ── patterns regex ────────────────────────────────────────────────────────────
 
-_RE_ERROR   = re.compile(r"ERROR: AddressSanitizer: ([\w-]+)", re.IGNORECASE)
-_RE_ACCESS  = re.compile(r"(READ|WRITE) of size (\d+)", re.IGNORECASE)
-_RE_FRAME   = re.compile(r"#(\d+)\s+0x[0-9a-f]+ in (\S+)\s+(.+)")
-_RE_ADDR    = re.compile(r"on address (0x[0-9a-f]+)", re.IGNORECASE)
-_RE_FILELINE= re.compile(r"(\S+):(\d+)")
+_RE_ERROR    = re.compile(r"ERROR: AddressSanitizer: ([\w-]+)", re.IGNORECASE)
+_RE_ACCESS   = re.compile(r"(READ|WRITE) of size (\d+)", re.IGNORECASE)
+_RE_FRAME    = re.compile(r"#(\d+)\s+0x[0-9a-f]+ in (\S+)\s+(.+)")
+_RE_ADDR     = re.compile(r"on address (0x[0-9a-f]+)", re.IGNORECASE)
+# Marqueurs de début de sections secondaires ASan (freed-by, alloc, shadow…)
+_RE_SECONDARY = re.compile(
+    r"\n\s*(?:freed by thread|previously allocated by|allocated by|"
+    r"SUMMARY:|Shadow bytes|Address 0x)",
+    re.IGNORECASE,
+)
+
+
+_RUNTIME_PREFIXES = (
+    "__interceptor_", "__sanitizer_", "__sanitizer::", "__asan_", "_asan_", "asan_",
+    "__libc_", "__GI_", "libc_",
+)
+_RUNTIME_EXACT = {"??", "<unknown>", "_start", "__start", "__libc_start_main",
+                   "__libc_start_call_main"}
+
+
+def _is_runtime_frame(func: str) -> bool:
+    """Vrai si le frame appartient à un runtime interne (ASan, libc, CRT…)."""
+    return func in _RUNTIME_EXACT or any(func.startswith(p) for p in _RUNTIME_PREFIXES)
 
 
 class ASanReport:
-    """Structured representation of one ASan error."""
+    """Représentation structurée d'une erreur ASan."""
 
     def __init__(self, raw: str) -> None:
         self.raw = raw
@@ -64,16 +82,31 @@ class ASanReport:
         self.access_op: str = ""      # "READ" | "WRITE" | ""
         self.access_size: int = 0
         self.address: str = ""
-        self.frames: list[dict] = []  # [{idx, func, location}, …]
+        self.frames: list[dict] = []         # frames section primaire (l'accès fautif)
+        self.freed_frames: list[dict] = []   # frames section "freed by"
         self._parse()
+
+    @staticmethod
+    def _extract_frames(text: str) -> list[dict]:
+        """Extrait les frames ASan d'un bloc de texte, triés par index."""
+        frames = []
+        for m in _RE_FRAME.finditer(text):
+            loc = m.group(3).strip()
+            loc = re.sub(r"\x1b\[[0-9;]*m", "", loc)
+            frames.append({
+                "idx":      int(m.group(1)),
+                "func":     m.group(2),
+                "location": loc,
+            })
+        frames.sort(key=lambda f: f["idx"])
+        return frames
 
     def _parse(self) -> None:
         m = _RE_ERROR.search(self.raw)
         if m:
             self.error_type = m.group(1).lower()
-        # Handle "nested bug" / DEADLYSIGNAL — still a valid error report
+        # Gestion du "bug imbriqué" / DEADLYSIGNAL — reste un rapport d'erreur valide
         if not self.error_type and "DEADLYSIGNAL" in self.raw:
-            # Re-scan for the initial error type before DEADLYSIGNAL
             m2 = re.search(r"ERROR: AddressSanitizer: ([\w-]+)", self.raw)
             if m2:
                 self.error_type = m2.group(1).lower()
@@ -87,15 +120,20 @@ class ASanReport:
         if m:
             self.address = m.group(1)
 
-        for m in _RE_FRAME.finditer(self.raw):
-            loc = m.group(3).strip()
-            # Strip ASAN_OPTIONS colour codes / parentheses
-            loc = re.sub(r"\x1b\[[0-9;]*m", "", loc)
-            self.frames.append({
-                "idx":      int(m.group(1)),
-                "func":     m.group(2),
-                "location": loc,
-            })
+        # Découpe la sortie en sections pour éviter de mélanger les backtraces.
+        # La section primaire va jusqu'au premier marqueur secondaire (freed by, etc.)
+        sec_match = _RE_SECONDARY.search(self.raw)
+        primary_text = self.raw[:sec_match.start()] if sec_match else self.raw
+
+        self.frames = self._extract_frames(primary_text)
+
+        # Capture optionnelle du premier frame "freed by" (utile pour UAF/double-free)
+        if sec_match:
+            freed_start = sec_match.start()
+            next_sec = _RE_SECONDARY.search(self.raw, freed_start + 1)
+            freed_text = self.raw[freed_start: next_sec.start() if next_sec else None]
+            if "freed by" in freed_text.lower():
+                self.freed_frames = self._extract_frames(freed_text)
 
     @property
     def is_valid(self) -> bool:
@@ -103,20 +141,9 @@ class ASanReport:
 
     @property
     def first_user_frame(self) -> Optional[dict]:
-        """First stack frame NOT in ASan/libc internals."""
-        skip_prefixes = (
-            "__interceptor_", "__sanitizer_", "__asan_", "_asan_", "asan_",
-            "__libc_", "__GI_", "libc_",
-        )
-        skip_exact = {"??", "<unknown>"}
+        """Premier frame de pile hors des internals ASan/libc/runtime."""
         for f in self.frames:
-            fn = f["func"]
-            if not any(fn.startswith(s) for s in skip_prefixes) and fn not in skip_exact:
-                return f
-        # Fall back to first non-sanitizer frame
-        for f in self.frames:
-            fn = f["func"]
-            if not any(fn.startswith(s) for s in skip_prefixes):
+            if not _is_runtime_frame(f["func"]):
                 return f
         return self.frames[0] if self.frames else None
 
@@ -131,31 +158,40 @@ class ASanReport:
 
         frame = self.first_user_frame
         func  = frame["func"] if frame else "<unknown>"
-        loc   = frame["location"] if frame else ""
+        src_loc = frame["location"] if frame else ""
 
         op_desc = (f"{self.access_op} of {self.access_size}B" if self.access_op
                    else "access")
         lines = [f"ASan: {self.error_type}"]
         lines.append(f"operation : {op_desc}" + (f" at {self.address}" if self.address else ""))
         if frame:
-            lines.append(f"in {func}() ({loc})")
-        # Include first 3 user-visible frames as backtrace
-        skip_prefixes = ("__interceptor_", "__sanitizer_", "__asan_", "_asan_",
-                         "asan_", "__libc_", "__GI_", "libc_")
-        user_frames = [
-            f for f in self.frames
-            if not any(f["func"].startswith(s) for s in skip_prefixes)
-        ][:3]
+            # Affiche la localisation source si disponible (DWARF embarqué dans le binaire)
+            lines.append(f"in {func}()" + (f" — {src_loc}" if src_loc else ""))
+
+        # Backtrace : uniquement les frames utilisateur de la section primaire (accès fautif),
+        # triés et limités à 4 entrées pour ne pas noyer la preuve.
+        user_frames = [f for f in self.frames if not _is_runtime_frame(f["func"])][:4]
         if user_frames:
             lines.append("backtrace :")
             for fr in user_frames:
                 lines.append(f"  #{fr['idx']} {fr['func']} ({fr['location']})")
+
+        # Pour UAF/double-free : indique où le free() a eu lieu (section secondaire)
+        if self.freed_frames:
+            first_user_freed = next(
+                (f for f in self.freed_frames if not _is_runtime_frame(f["func"])), None
+            )
+            if first_user_freed:
+                lines.append(f"free() en : {first_user_freed['func']} ({first_user_freed['location']})")
+
         evidence = "\n".join(lines)
 
         return Finding(
             vuln_class=vc,
             function=func,
-            location=loc or self.address,
+            # Préfère l'adresse hexadécimale pour la colonne localisation ;
+            # la référence source est déjà dans l'evidence.
+            location=self.address or src_loc,
             severity=base_sev,
             confidence="dynamic",
             analysis="dynamic",
@@ -165,8 +201,8 @@ class ASanReport:
 
 
 def parse_output(text: str) -> list[ASanReport]:
-    """Split multi-error ASan output into individual ASanReport objects."""
-    # Each error block starts with "==PID==ERROR:"
+    """Découpe la sortie ASan multi-erreurs en objets ASanReport individuels."""
+    # Chaque bloc d'erreur commence par "==PID==ERROR:"
     blocks = re.split(r"(?====\d+==ERROR:)", text)
     reports = []
     for block in blocks:
@@ -184,7 +220,7 @@ def run_and_parse(
     argv_extra: list[str] | None = None,
     timeout: int = 15,
 ) -> list[Finding]:
-    """Run the ASan build of *binary_path* and return Findings from its output."""
+    """Exécute le binaire ASan de *binary_path* et retourne les Findings issus de sa sortie."""
     result: RunResult = run_asan(
         binary_path,
         stdin_data=stdin_data,
@@ -197,7 +233,7 @@ def run_and_parse(
     return [f for f in findings if f is not None]
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── utilitaires ───────────────────────────────────────────────────────────────
 
 def _cwe(vc: VulnClass) -> str:
     return {

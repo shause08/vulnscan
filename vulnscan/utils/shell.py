@@ -1,4 +1,4 @@
-"""Secure subprocess wrapper with timeout and resource limits."""
+"""Wrapper subprocess sécurisé avec timeout et limites de ressources."""
 
 import resource
 import subprocess
@@ -11,15 +11,15 @@ from vulnscan.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_TIMEOUT = 30
-# Limit address space to 256 MiB for spawned binaries.
+# Limite l'espace d'adressage à 256 Mio pour les binaires lancés.
 _AS_LIMIT = 256 * 1024 * 1024
 
 
 def _set_limits() -> None:
-    """Pre-exec hook: restrict resources for potentially hostile child processes."""
+    """Hook pré-exec : restreint les ressources des processus fils potentiellement hostiles."""
     try:
         resource.setrlimit(resource.RLIMIT_AS, (_AS_LIMIT, _AS_LIMIT))
-        # No core dumps.
+        # Pas de core dumps.
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except ValueError:
         pass
@@ -34,10 +34,11 @@ def run(
     env: Optional[dict[str, str]] = None,
     limit_resources: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    """Run a command and return its CompletedProcess.
+    """Exécute une commande et retourne son CompletedProcess.
 
-    Never raises on non-zero exit; raises CalledProcessError only when explicitly
-    asked, or TimeoutExpired / FileNotFoundError on real errors.
+    Ne lève jamais d'exception sur un code de sortie non nul ; lève CalledProcessError
+    uniquement si explicitement demandé, ou TimeoutExpired / FileNotFoundError sur
+    de vraies erreurs.
     """
     preexec = _set_limits if limit_resources else None
     logger.debug("run: %s", " ".join(args))
@@ -52,16 +53,16 @@ def run(
             preexec_fn=preexec,
         )
     except subprocess.TimeoutExpired as exc:
-        logger.warning("Command timed out after %ds: %s", timeout, args[0])
+        logger.warning("Commande expirée après %ds : %s", timeout, args[0])
         raise
     except FileNotFoundError:
-        logger.error("Executable not found: %s", args[0])
+        logger.error("Exécutable introuvable : %s", args[0])
         raise
     return result
 
 
 def check_system_deps() -> list[str]:
-    """Return a list of missing required system executables."""
+    """Retourne la liste des exécutables système requis mais absents."""
     required = ["gcc", "gdb", "make"]
     missing = []
     for exe in required:

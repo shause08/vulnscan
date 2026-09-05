@@ -1,21 +1,21 @@
-"""Mutation-based fuzzer for ELF binary inputs.
+"""Fuzzer à mutations pour les entrées de binaires ELF.
 
-Strategies
+Stratégies
 ----------
-1. **Size escalation** — sends growing payloads (8, 16, 32 … 4096 bytes) of
-   repeated 'A' bytes.  Reliably triggers stack/heap buffer overflows.
-2. **Cyclic patterns** — pwntools `cyclic()` payloads of the same sizes.
-   Allows Phase 5 to compute the exact offset to saved RIP via `cyclic_find`.
-3. **Format string probes** — payloads of `%x.%p.%s.%n` / `%7$n` etc. to
-   trigger format-string crashes.
-4. **Integer boundaries** — argv values like "0", "-1", "4294967295",
-   "65536", "4097" to trigger integer-overflow + allocation bugs.
-5. **Bit-flip / byte-insert mutations** — applied to a set of seed inputs for
-   broader coverage.
+1. **Escalade de taille** — envoie des charges utiles croissantes (8, 16, 32 … 4096 octets)
+   d'octets 'A' répétés. Déclenche de manière fiable les dépassements de tampon pile/tas.
+2. **Patterns cycliques** — charges utiles pwntools `cyclic()` des mêmes tailles.
+   Permet à la Phase 5 de calculer l'offset exact vers le RIP sauvegardé via `cyclic_find`.
+3. **Sondes de chaîne de format** — charges utiles `%x.%p.%s.%n` / `%7$n` etc. pour
+   déclencher des crashes de format string.
+4. **Bornes entières** — valeurs argv comme "0", "-1", "4294967295", "65536", "4097"
+   pour déclencher des bugs d'overflow entier + allocation.
+5. **Mutations bit-flip / insertion d'octet** — appliquées à un ensemble d'entrées
+   de départ pour une couverture plus large.
 
-Extension point: the `fuzz()` function returns after `max_crashes` are found
-or `max_iterations` are exhausted.  To plug in AFL++, replace `fuzz()` with a
-thin wrapper that calls `afl-fuzz` and parses its crashes directory.
+Point d'extension : la fonction `fuzz()` s'arrête après `max_crashes` crashes trouvés
+ou `max_iterations` épuisées. Pour brancher AFL++, remplacer `fuzz()` par un wrapper
+qui appelle `afl-fuzz` et parse son répertoire de crashes.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from vulnscan.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Silence pwntools context noise
+# Silence le bruit de contexte pwntools
 import logging as _logging
 _logging.getLogger("pwnlib").setLevel(_logging.ERROR)
 
@@ -42,13 +42,13 @@ _logging.getLogger("pwnlib").setLevel(_logging.ERROR)
 @dataclasses.dataclass
 class CrashResult:
     binary: str
-    strategy: str            # which mutation strategy produced the crash
-    stdin_data: bytes        # the exact input that triggered the crash
-    argv_extra: list[str]   # extra argv beyond the binary name
+    strategy: str            # quelle stratégie de mutation a produit le crash
+    stdin_data: bytes        # l'entrée exacte qui a déclenché le crash
+    argv_extra: list[str]   # arguments argv supplémentaires après le nom du binaire
     signal_name: str
     signal_num: int
     returncode: int
-    stderr_snippet: str      # first 512 bytes of stderr (ASan report etc.)
+    stderr_snippet: str      # 512 premiers octets du stderr (rapport ASan etc.)
     iteration: int
 
 
@@ -65,7 +65,7 @@ class FuzzReport:
 
     @property
     def cyclic_crashes(self) -> list[CrashResult]:
-        """Crashes caused by cyclic patterns — usable for offset calculation."""
+        """Crashes provoqués par des patterns cycliques — utilisables pour le calcul d'offset."""
         return [c for c in self.crashes if c.strategy.startswith("cyclic")]
 
 
@@ -79,16 +79,16 @@ def fuzz(
     seed: int = 42,
     strategies: Optional[list[str]] = None,
 ) -> FuzzReport:
-    """Run the mutation fuzzer on *binary_path*.
+    """Lance le fuzzer à mutations sur *binary_path*.
 
-    Parameters
+    Paramètres
     ----------
-    argv_extra  : extra arguments appended after the binary (e.g. ["200"]).
-    timeout     : per-execution timeout in seconds.
-    max_iterations : stop after this many payloads tested.
-    max_crashes : stop early once this many crashes are found.
-    seed        : RNG seed for reproducibility.
-    strategies  : subset of strategy names to run (default: all).
+    argv_extra      : arguments supplémentaires après le binaire (ex. ["200"]).
+    timeout         : timeout par exécution en secondes.
+    max_iterations  : s'arrête après ce nombre de charges utiles testées.
+    max_crashes     : s'arrête dès que ce nombre de crashes est atteint.
+    seed            : graine RNG pour la reproductibilité.
+    strategies      : sous-ensemble de noms de stratégies à exécuter (défaut : toutes).
     """
     rng = random.Random(seed)
     all_strategies = ["size_escalation", "cyclic", "format_string",
@@ -137,13 +137,13 @@ def fuzz(
             )
 
     logger.info(
-        "Fuzzing done: %d iterations, %d crash(es) found",
+        "Fuzzing terminé : %d itération(s), %d crash(es) trouvé(s)",
         report.iterations, len(report.crashes),
     )
     return report
 
 
-# ── payload generators ────────────────────────────────────────────────────────
+# ── générateurs de charges utiles ─────────────────────────────────────────────
 
 def _payload_generator(
     binary_path: Path,
@@ -151,7 +151,7 @@ def _payload_generator(
     rng: random.Random,
     active: list[str],
 ) -> Iterator[tuple[str, bytes, list[str]]]:
-    """Yield (strategy_name, stdin_bytes, argv_override) tuples."""
+    """Produit des tuples (nom_stratégie, octets_stdin, argv_override)."""
     gens: list[Iterator] = []
 
     if "size_escalation" in active:
@@ -165,12 +165,12 @@ def _payload_generator(
     if "mutation" in active:
         gens.append(_mutation_payloads(rng))
 
-    # Round-robin across strategies
+    # Round-robin entre stratégies
     for payload in itertools.chain.from_iterable(zip(*gens)):
         yield payload
 
 
-# ── strategy: size escalation ─────────────────────────────────────────────────
+# ── stratégie : escalade de taille ───────────────────────────────────────────
 
 def _size_escalation() -> Iterator[tuple[str, bytes, list[str]]]:
     sizes = [8, 16, 32, 48, 63, 64, 65, 100, 128, 256, 512, 1024, 2048, 4096]
@@ -179,10 +179,10 @@ def _size_escalation() -> Iterator[tuple[str, bytes, list[str]]]:
         yield ("size_escalation", payload, [])
 
 
-# ── strategy: cyclic patterns ─────────────────────────────────────────────────
+# ── stratégie : patterns cycliques ───────────────────────────────────────────
 
 def _cyclic_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
-    """Generate pwntools cyclic() patterns for offset calculation."""
+    """Génère des patterns pwntools cyclic() pour le calcul d'offset."""
     try:
         from pwn import cyclic, context
         context.log_level = "error"
@@ -191,14 +191,14 @@ def _cyclic_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
             payload = cyclic(size) + b"\n"
             yield (f"cyclic_{size}", payload, [])
     except ImportError:
-        # Fallback: De Bruijn-like sequence without pwntools
+        # Repli : séquence De Bruijn approchée sans pwntools
         for size in [64, 128, 256, 512]:
             payload = _debruijn(size) + b"\n"
             yield (f"cyclic_{size}", payload, [])
 
 
 def _debruijn(length: int) -> bytes:
-    """Simple De Bruijn sequence approximation."""
+    """Approximation simple d'une séquence De Bruijn."""
     alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     n = len(alphabet)
     result = bytearray()
@@ -207,7 +207,7 @@ def _debruijn(length: int) -> bytes:
     return bytes(result)
 
 
-# ── strategy: format string ───────────────────────────────────────────────────
+# ── stratégie : chaîne de format ──────────────────────────────────────────────
 
 def _format_string_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
     probes = [
@@ -226,25 +226,25 @@ def _format_string_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
         yield ("format_string", p, [])
 
 
-# ── strategy: integer boundary (argv-based) ───────────────────────────────────
+# ── stratégie : bornes entières (argv-based) ──────────────────────────────────
 
 def _integer_boundary_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
-    """Boundary values passed as argv[1] for binaries that parse an integer.
+    """Valeurs limites passées en argv[1] pour les binaires qui parsent un entier.
 
-    For values that look like element-counts, we also send count*ELEM_SIZE bytes
-    so that the allocation-underflow bug (integer_overflow corpus) is reachable.
-    ELEM_SIZE=64 matches the corpus binary; the limit caps stdin at 512 KiB.
+    Pour les valeurs qui ressemblent à des compteurs d'éléments, on envoie aussi
+    count*ELEM_SIZE octets afin que le bug d'underflow d'allocation soit atteignable.
+    ELEM_SIZE=64 correspond au binaire du corpus ; la limite plafonne stdin à 512 Kio.
     """
     boundary_vals = [
         "0", "1", "-1", "255", "256", "65535", "65536",
         "4294967295",   # UINT_MAX
         "2147483647",   # INT_MAX
         "2147483648",   # INT_MAX + 1
-        "4097",         # triggers uint16 wrap: 4097*64 mod 65536 = 64
+        "4097",         # déclenche le débordement uint16 : 4097*64 mod 65536 = 64
         "1025",         # 1025*64 mod 65536 = 64
     ]
     _ELEM_SIZE  = 64
-    _MAX_STDIN  = 512 * 1024  # 512 KiB hard cap
+    _MAX_STDIN  = 512 * 1024  # 512 Kio max
 
     for val in boundary_vals:
         try:
@@ -252,18 +252,18 @@ def _integer_boundary_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
         except ValueError:
             n = 64
 
-        # Small value: just send n bytes
+        # Petite valeur : envoie n octets
         stdin_simple = b"A" * min(n, 4096) + b"\n"
         yield ("integer_boundary", stdin_simple, [val])
 
-        # Also try sending count*ELEM_SIZE bytes (triggers alloc-size underflow)
+        # Essaie aussi d'envoyer count*ELEM_SIZE octets (déclenche l'underflow de taille d'alloc)
         count_bytes = min(n * _ELEM_SIZE, _MAX_STDIN)
         if count_bytes > len(stdin_simple):
             stdin_large = b"A" * count_bytes
             yield ("integer_boundary_large", stdin_large, [val])
 
 
-# ── strategy: random mutations ────────────────────────────────────────────────
+# ── stratégie : mutations aléatoires ─────────────────────────────────────────
 
 _SEEDS = [
     b"A" * 64,
@@ -285,18 +285,18 @@ def _mutate(data: bytearray, rng: random.Random) -> bytearray:
     if not data:
         return data
     op = rng.randint(0, 3)
-    if op == 0:  # bit flip
+    if op == 0:  # inversion de bit
         idx = rng.randint(0, len(data) - 1)
         bit = 1 << rng.randint(0, 7)
         data[idx] ^= bit
-    elif op == 1:  # byte insert
+    elif op == 1:  # insertion d'octet
         idx = rng.randint(0, len(data))
         data.insert(idx, rng.randint(0, 255))
-    elif op == 2:  # byte delete
+    elif op == 2:  # suppression d'octet
         if len(data) > 1:
             idx = rng.randint(0, len(data) - 1)
             del data[idx]
-    else:  # chunk overwrite with interesting values
+    else:  # écrasement de chunk avec des valeurs intéressantes
         interesting = [b"\x00", b"\xff", b"\x7f", b"\x80", b"A", b"%x", b"\n"]
         chunk = rng.choice(interesting) * rng.randint(1, min(32, len(data)))
         start = rng.randint(0, max(0, len(data) - len(chunk)))

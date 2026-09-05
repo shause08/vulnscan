@@ -145,7 +145,13 @@ class TestDangerousFuncs:
         assert "read" in evidence_all
 
     def test_format_string_detects_printf(self):
-        findings = self._analyze("format_string_vuln")
+        # La détection format-string a été déplacée vers taint.py pour éviter les
+        # faux positifs (printf avec format littéral n'est pas une vulnérabilité).
+        # Ce test vérifie que le pipeline statique complet la détecte correctement.
+        from vulnscan.static.elf_info import parse
+        from vulnscan.static import taint as taint_mod
+        p = _req("format_string_vuln")
+        findings = taint_mod.analyze(p, parse(p))
         vuln_classes = [f.vuln_class.value for f in findings]
         assert "format-string" in vuln_classes
 

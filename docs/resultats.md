@@ -25,102 +25,112 @@ Tous les binaires `_vuln` ont les protections désactivées intentionnellement. 
 
 ## Findings par binaire
 
-### stack\_bof\_vuln — analyse statique
+### stack\_bof\_vuln — analyse statique seule
 
 | Sévérité | Classe | Fonction | Confiance | Source |
 |----------|--------|----------|-----------|--------|
-| CRITICAL | stack-buffer-overflow | `vulnerable` | static | disasm (gets sans borne) |
-| HIGH | stack-buffer-overflow | `vulnerable` | static | taint (gets → stack) |
-| HIGH | format-string | `vulnerable` | static | taint (printf format RBP-rel) |
+| CRITICAL | stack-buffer-overflow | `vulnerable` | static | disasm (gets sans borne, frame 64 B) |
+| HIGH | stack-buffer-overflow | `vulnerable` | static | dangerous_funcs (appel gets) |
 
 ### stack\_bof\_vuln — analyse complète (static + dynamic)
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| CRITICAL | stack-buffer-overflow | `vulnerable` | **both** |
-| CRITICAL | stack-buffer-overflow | `<dynamic>` | **both** |
-| HIGH | stack-buffer-overflow | `vulnerable` | **both** |
-| HIGH | stack-buffer-overflow | `printf_common` | **both** |
-| HIGH | format-string | `vulnerable` | static |
+| Sévérité | Classe | Fonction | Confiance | Analyse |
+|----------|--------|----------|-----------|---------|
+| CRITICAL | stack-buffer-overflow | `vulnerable` | **both** | static |
+| CRITICAL | stack-buffer-overflow | `<dynamic>` | **both** | dynamic (fuzzer crash) |
+| HIGH | stack-buffer-overflow | `vulnerable` | **both** | static |
+| HIGH | stack-buffer-overflow | `printf_common` | **both** | dynamic (ASan baseline) |
 
 **Offset RIP calculé** : 72 octets (64 octets de buffer + 8 octets saved RBP).  
-**Exploitability** : EXPLOITABLE (GDB plugin CERT + heuristique RIP = bytes ASCII cyclic).  
+**Exploitability** : EXPLOITABLE (heuristique RIP = bytes ASCII cyclic).  
 **Promotion CRITICAL** : l'offset vers RIP est connu → promotion automatique.
 
-### heap\_bof\_vuln — analyse statique
+### heap\_bof\_vuln — analyse statique seule
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| HIGH | format-string | `main` | static |
-| HIGH | format-string | `vulnerable` | static |
-| MEDIUM | heap-buffer-overflow | `vulnerable` | static |
-| MEDIUM | heap-buffer-overflow | `vulnerable` | static |
+| Sévérité | Classe | Fonction | Confiance | Source |
+|----------|--------|----------|-----------|--------|
+| MEDIUM | heap-buffer-overflow | `vulnerable` | static | disasm (read, longueur non constante) |
+| MEDIUM | heap-buffer-overflow | `vulnerable` | static | dangerous_funcs (appel read) |
 
-La vulnérabilité heap BOF est détectée en MEDIUM (longueur non-constante passée à `read`). L'absence de crash immédiat dans glibc sans ASan limite la détection dynamique ; le build ASan `heap_bof_asan` détecte un `heap-buffer-overflow` HIGH avec argv `300`.
+La vulnérabilité heap BOF est détectée en MEDIUM (longueur non-constante passée à `read`). Le fuzzer ne crashe pas le binaire non instrumenté (le heap overflow ne se manifeste qu'au prochain `malloc`/`free`) ; le build ASan `heap_bof_asan` est requis pour la confirmation dynamique.
 
-### format\_string\_vuln — analyse statique
+### heap\_bof\_vuln — analyse complète
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| HIGH | format-string | `vulnerable` | static |
-| HIGH | format-string | `main` | static |
-| HIGH | format-string | `vulnerable` | static |
+Identique à l'analyse statique seule : les findings restent `confidence=static` faute de crash dynamique détectable. Si le build ASan est présent et que les entrées baseline déclenchent le bug, un finding dynamique HEAP_BOF HIGH s'ajoute.
 
-Trois findings distincts correspondent à trois appels `printf` avec argument contrôlable. Le fuzzer déclenche un crash SIGSEGV avec `%s%s%s%n` (accès mémoire arbitraire via `%n`).
+### format\_string\_vuln — analyse statique seule
 
-### integer\_overflow\_vuln — analyse statique
+| Sévérité | Classe | Fonction | Confiance | Source |
+|----------|--------|----------|-----------|--------|
+| HIGH | format-string | `vulnerable` | static | taint (printf avec buffer RBP-rel) |
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| HIGH | format-string | `main` | static |
-| HIGH | format-string | `vulnerable` | static |
-| MEDIUM | heap-buffer-overflow | `vulnerable` | static |
-| MEDIUM | heap-buffer-overflow | `vulnerable` | static |
+### format\_string\_vuln — analyse complète
 
-La vulnérabilité d'overflow entier elle-même n'est pas détectable statiquement (le calcul `uint16_t count * ELEM_SIZE` est syntaxiquement valide). vulnscan détecte la conséquence : `memcpy` avec longueur non-constante → HEAP_BOF MEDIUM. Dynamiquement, la stratégie `integer_boundary_large` (count=4097, stdin=262 208 octets) déclenche le crash ASan.
+| Sévérité | Classe | Fonction | Confiance | Analyse |
+|----------|--------|----------|-----------|---------|
+| CRITICAL | format-string | `<dynamic>` | **both** | dynamic (fuzzer crash %s%n) |
+| HIGH | format-string | `vulnerable` | **both** | static |
+| MEDIUM | unknown | `printf_common` | dynamic | dynamic (ASan segfault interne printf) |
 
-### uaf\_vuln — analyse statique
+Le fuzzer déclenche un crash SIGSEGV avec `%s%s%s%n` (accès mémoire arbitraire via `%n`). Le finding MEDIUM `unknown/printf_common` provient d'un segfault ASan dans l'implémentation interne de printf lors du traitement de l'entrée malformée — c'est un artefact du point d'arrêt dans printf plutôt qu'une vulnérabilité distincte.
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| HIGH | format-string | `default_greet` | static |
-| HIGH | format-string | `admin_greet` | static |
+### integer\_overflow\_vuln — analyse statique seule
 
-La vulnérabilité UAF elle-même (free() suivi d'un accès via pointeur dangling) n'est pas détectable par analyse statique intra-procédurale. vulnscan détecte les appels `printf` avec format potentiellement contrôlable dans les deux fonctions. L'ASan build `uaf_asan` détecte `heap-use-after-free` HIGH avec `func=main`.
+| Sévérité | Classe | Fonction | Confiance | Source |
+|----------|--------|----------|-----------|--------|
+| MEDIUM | heap-buffer-overflow | `vulnerable` | static | disasm (memcpy, longueur non constante) |
+| MEDIUM | heap-buffer-overflow | `vulnerable` | static | dangerous_funcs (appel memcpy) |
 
-### off\_by\_one\_vuln — analyse statique
+La vulnérabilité d'overflow entier elle-même n'est pas détectable statiquement (le calcul `uint16_t count * ELEM_SIZE` est syntaxiquement valide). vulnscan détecte la **conséquence** : `memcpy` avec longueur non-constante → HEAP_BOF MEDIUM. Dynamiquement, la stratégie `integer_boundary_large` (count=4097 → 262 208 octets copiés dans un buffer de 4 096 octets) déclenche le crash ASan si le build `integer_overflow_asan` est disponible.
 
-| Sévérité | Classe | Fonction | Confiance |
-|----------|--------|----------|-----------|
-| HIGH | format-string | `vulnerable` | static |
-| HIGH | format-string | `main` | static |
+### uaf\_vuln — analyse statique seule
 
-La vulnérabilité off-by-one (boucle `for i in range(BUF_SIZE+1)`) déborde d'un octet. Le build ASan `off_by_one_asan` détecte `stack-buffer-overflow` HIGH en `vulnerable()` avec un input de 64 octets.
+Aucun finding statique. La vulnérabilité UAF (free() suivi d'un accès via pointeur dangling) n'est pas détectable par analyse statique intra-procédurale : le free et l'accès sont dans des chemins d'exécution distincts.
+
+### uaf\_vuln — analyse complète
+
+| Sévérité | Classe | Fonction | Confiance | Analyse |
+|----------|--------|----------|-----------|---------|
+| HIGH | use-after-free | `main` | **both** | dynamic (ASan baseline `b""`) |
+
+Le fuzzer ne crashe pas le binaire non instrumenté car le chunk libéré est immédiatement recyclé par `malloc` et le pointeur dangling finit par appeler une fonction valide — pas de SIGSEGV. L'entrée vide (baseline) soumise au binaire ASan déclenche le UAF dès l'entrée dans `main`. La confiance `"both"` signifie que plusieurs exécutions ASan (différentes entrées baseline) ont détecté indépendamment le même bug.
+
+### off\_by\_one\_vuln — analyse statique seule
+
+Aucun finding statique. L'off-by-one (boucle `for i in range(BUF_SIZE+1)`) n'est pas détectable sans modélisation des bornes de boucle.
+
+### off\_by\_one\_vuln — analyse complète
+
+| Sévérité | Classe | Fonction | Confiance | Analyse |
+|----------|--------|----------|-----------|---------|
+| HIGH | stack-buffer-overflow | `vulnerable` | **both** | dynamic (ASan baseline 64-65 octets) |
+
+La boucle écrit un octet nul en dehors du buffer, qui écrase l'octet de poids faible du saved RBP. Cela ne provoque pas de crash dans le binaire normal (le programme retourne à une adresse légèrement différente mais souvent valide). ASan détecte le dépassement d'un octet sur la pile avec l'entrée baseline de 64 ou 65 octets.
 
 ## Récapitulatif global
 
-| Binaire | Findings statiques | Classe principale détectée | Dynamique |
-|---------|:-----------------:|--------------------------|:---------:|
-| stack\_bof | 3 | STACK_BOF ✓ | CRITICAL + offset=72 |
-| heap\_bof | 4 | HEAP_BOF ✓ (MEDIUM) | ASan: HEAP_BOF HIGH |
-| format\_string | 3 | FORMAT_STRING ✓ | Crash %s%n |
-| integer\_overflow | 4 | HEAP_BOF ✓ (conséquence) | ASan: HEAP_BOF HIGH |
-| uaf | 2 | FORMAT_STRING (partiel) | ASan: USE_AFTER_FREE HIGH |
-| off\_by\_one | 2 | FORMAT_STRING (partiel) | ASan: STACK_BOF HIGH |
+| Binaire | Findings statiques | Classe principale | Dynamic |
+|---------|:-----------------:|-------------------|:-------:|
+| stack\_bof | 2 | STACK_BOF CRITICAL ✓ | CRITICAL + offset=72 |
+| heap\_bof | 2 | HEAP_BOF MEDIUM ✓ | (build ASan requis) |
+| format\_string | 1 | FORMAT_STRING HIGH ✓ | CRITICAL (%s%n crash) |
+| integer\_overflow | 2 | HEAP_BOF MEDIUM ✓ (conséquence) | (build ASan requis) |
+| uaf | 0 | — | USE_AFTER_FREE HIGH ✓ (ASan baseline) |
+| off\_by\_one | 0 | — | STACK_BOF HIGH ✓ (ASan baseline) |
 
-**Taux de détection** (au moins un finding pertinent par binaire) : **6/6 (100%)** avec la combinaison statique + dynamique.
+**Taux de détection** (au moins un finding pertinent par binaire) : **6/6 (100%)** avec la combinaison statique + dynamique et les builds ASan disponibles.
 
-**Faux positifs observés** : les appels `printf(fmt_str, ...)` avec format littéral constant sont parfois signalés comme format-string potentiels si la chaîne de format est chargée depuis une variable locale (pas directement depuis `.rodata`). Ce comportement est attendu pour une analyse intra-procédurale conservative.
+**Faux positifs éliminés** : `printf` et `fprintf` ont été retirés du catalogue de fonctions dangereuses. Les binaires qui affichent du texte avec un format littéral ne génèrent plus de faux positifs FORMAT_STRING. La détection des chaînes de format repose désormais exclusivement sur l'heuristique `rbp_rel` de taint.py, qui vérifie que l'argument de format est bien un buffer sur la frame courante.
 
 ## Performances
 
 | Binaire | Statique seul | Static + Dynamic |
 |---------|:-------------:|:----------------:|
-| stack\_bof | 0.38 s | ~35 s |
-| heap\_bof | 0.41 s | ~35 s |
-| format\_string | 0.35 s | ~35 s |
-| integer\_overflow | 0.40 s | ~40 s |
-| uaf | 0.33 s | ~30 s |
-| off\_by\_one | 0.36 s | ~30 s |
+| stack\_bof | ~0.4 s | ~35 s |
+| heap\_bof | ~0.4 s | ~5 s |
+| format\_string | ~0.4 s | ~10 s |
+| integer\_overflow | ~0.4 s | ~5 s |
+| uaf | ~0.4 s | ~5 s |
+| off\_by\_one | ~0.4 s | ~5 s |
 
-Le temps dynamique est dominé par le fuzzer (150 itérations × timeout par exécution) et le triage GDB (~5 s par crash).
+Le temps dynamique est dominé par le fuzzer (150 itérations × timeout par exécution) et le triage GDB (~5 s par crash). Les binaires sans crash fuzzer (uaf, off_by_one) sont plus rapides car seules les entrées baseline ASan sont exécutées.

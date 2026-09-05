@@ -1,4 +1,4 @@
-"""Centralised logging configuration for vulnscan."""
+"""Configuration centralisée du logging pour vulnscan."""
 
 import logging
 import sys
@@ -23,6 +23,6 @@ def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
 def configure_root(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.getLogger("vulnscan").setLevel(level)
-    # Silence noisy third-party loggers.
+    # Réduit au silence les loggers tiers bavards.
     for noisy in ("pwnlib", "lief"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

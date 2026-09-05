@@ -1,4 +1,4 @@
-"""Data model for scan results."""
+"""Modèle de données pour les résultats de scan."""
 
 from __future__ import annotations
 
@@ -44,12 +44,12 @@ class Protection:
 class Finding:
     vuln_class: VulnClass
     function: str
-    location: str                          # address / offset / file:line
+    location: str                          # adresse / offset / fichier:ligne
     severity: Severity
     confidence: str                        # "static" | "dynamic" | "both"
     analysis: str                          # "static" | "dynamic"
     evidence: str
-    offset: Optional[int] = None           # bytes to saved RIP, when found
+    offset: Optional[int] = None           # octets jusqu'au RIP sauvegardé, si connu
     cwe: Optional[str] = None
 
     def as_dict(self) -> dict:
