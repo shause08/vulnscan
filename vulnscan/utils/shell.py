@@ -11,15 +11,20 @@ from vulnscan.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_TIMEOUT = 30
-# Limite l'espace d'adressage à 256 Mio pour les binaires lancés.
+# Limite l'espace d'adressage virtuel à 256 Mio pour contenir les processus fils potentiellement hostiles.
+# Note : cette limite est incompatible avec ASan (qui mappe ~16× l'espace du processus) ;
+# run_asan() dans runner.py passe limit_resources=False pour cette raison.
 _AS_LIMIT = 256 * 1024 * 1024
 
 
 def _set_limits() -> None:
-    """Hook pré-exec : restreint les ressources des processus fils potentiellement hostiles."""
+    """Hook pré-exec : restreint les ressources des processus fils avant exec().
+
+    Appelé depuis preexec_fn de subprocess.Popen — s'exécute dans le fils juste avant exec().
+    """
     try:
         resource.setrlimit(resource.RLIMIT_AS, (_AS_LIMIT, _AS_LIMIT))
-        # Pas de core dumps.
+        # Désactive la génération de fichiers core dump pour éviter de remplir le disque
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except ValueError:
         pass
@@ -62,10 +67,11 @@ def run(
 
 
 def check_system_deps() -> list[str]:
-    """Retourne la liste des exécutables système requis mais absents."""
+    """Retourne la liste des exécutables système requis mais absents du PATH."""
     required = ["gcc", "gdb", "make"]
     missing = []
     for exe in required:
+        # which retourne un code non nul si l'exécutable est introuvable
         result = subprocess.run(
             ["which", exe], capture_output=True
         )

@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Construit l'arbre de sous-commandes argparse (scan, check-deps)."""
     parser = argparse.ArgumentParser(
         prog="vulnscan",
         description="Automated low-level vulnerability scanner for ELF binaries.",
@@ -27,6 +28,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── vulnscan scan ──────────────────────────────────────────────────────────
     scan_p = sub.add_parser("scan", help="Scan an ELF binary for vulnerabilities.")
     scan_p.add_argument("binary", type=Path, help="Path to the ELF binary to analyse.")
+    # Les flags --static/--no-static et --dynamic/--no-dynamic permettent de forcer
+    # une analyse partielle (ex. statique seulement pour les binaires sans build ASan)
     scan_p.add_argument(
         "--static", dest="do_static", action="store_true", default=True,
         help="Run static analysis (default: on).",
@@ -57,7 +60,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
+    """Exécute un scan complet sur le binaire spécifié et génère le rapport HTML."""
     binary = args.binary
+    # Validation préalable : vérifie que le chemin pointe vers un fichier existant
     if not binary.exists():
         logger.error("Binaire introuvable : %s", binary)
         return 1
@@ -65,6 +70,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         logger.error("N'est pas un fichier : %s", binary)
         return 1
 
+    # Lance le pipeline principal (analyse statique + dynamique selon les flags)
     result = scan(
         binary,
         do_static=args.do_static,
@@ -72,6 +78,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         timeout=args.timeout,
     )
 
+    # Génère le rapport HTML si jinja2 est disponible
     out_path = Path(args.out)
     try:
         from vulnscan.report.generator import render_html
@@ -85,6 +92,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _print_summary(result) -> None:
+    """Affiche un résumé tabulaire des findings par niveau de sévérité sur stdout."""
     print(f"\n{'='*60}")
     print(f"  vulnscan — {Path(result.binary_path).name}")
     print(f"{'='*60}")
@@ -92,6 +100,7 @@ def _print_summary(result) -> None:
     print(f"  Durée            : {result.duration_s}s")
     print(f"  Vulnérabilités   : {len(result.findings)}")
     from vulnscan.report.model import Severity
+    # Affiche uniquement les niveaux pour lesquels au moins un finding existe
     for sev in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]:
         count = sum(1 for f in result.findings if f.severity == sev)
         if count:
@@ -100,6 +109,7 @@ def _print_summary(result) -> None:
 
 
 def cmd_check_deps(_args: argparse.Namespace) -> int:
+    """Vérifie que gcc, gdb et make sont disponibles sur le système."""
     missing = check_system_deps()
     if missing:
         print("[MANQUANT] Les outils système suivants sont requis mais absents :")
@@ -112,11 +122,12 @@ def cmd_check_deps(_args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    """Point d'entrée principal : parse les arguments, configure le logging et dispatche."""
     parser = _build_parser()
     args = parser.parse_args()
     configure_root(verbose=getattr(args, "verbose", False))
 
-    # Vérifie les dépendances au démarrage, sans bloquer si certaines manquent.
+    # Avertit si des outils système manquent, sans bloquer (l'analyse statique reste possible)
     missing = check_system_deps()
     if missing and getattr(args, "command", None) == "scan":
         logger.warning(
@@ -124,6 +135,7 @@ def main() -> None:
             ", ".join(missing),
         )
 
+    # Table de dispatch : évite un if/elif pour rester extensible à de nouvelles sous-commandes
     dispatch = {"scan": cmd_scan, "check-deps": cmd_check_deps}
     rc = dispatch[args.command](args)
     sys.exit(rc)

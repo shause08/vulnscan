@@ -71,9 +71,17 @@ _CATALOGUE_MAP: dict[str, DangerousFunc] = {d.name: d for d in _CATALOGUE}
 
 
 def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
-    """Retourne les Findings statiques pour l'utilisation de fonctions dangereuses."""
+    """Retourne les Findings statiques pour l'utilisation de fonctions dangereuses.
+
+    Flux :
+    1. Intersecte les imports du binaire avec le catalogue pour obtenir les fonctions dangereuses présentes.
+    2. Restreint la PLT map aux seuls stubs dangereux (optimisation : réduit le désassemblage).
+    3. Pour chaque site d'appel trouvé, émet un Finding par paire unique (callee, caller).
+    4. Si un import est visible mais sans site d'appel résolu (binaire strippé), émet quand même un finding.
+    """
     findings: list[Finding] = []
 
+    # Étape 1 : quelles fonctions dangereuses sont réellement importées par ce binaire ?
     imported_names = elf_info.import_names()
     dangerous_imported = {n for n in imported_names if n in _CATALOGUE_MAP}
 
@@ -83,21 +91,23 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
 
     logger.debug("%s : imports dangereux : %s", binary_path.name, ", ".join(sorted(dangerous_imported)))
 
-    # Restreint plt_map aux seules fonctions dangereuses
+    # Étape 2 : filtre la PLT map pour ne désassembler que les CALL vers des fonctions dangereuses
     dangerous_plt: dict[int, str] = {
         addr: name
         for addr, name in elf_info.plt_map.items()
         if name in dangerous_imported
     }
 
+    # Étape 3 : désassemble les sections exécutables et collecte les sites d'appel
     call_sites = _find_call_sites(binary_path, elf_info, dangerous_plt)
 
-    emitted: set[tuple[str, str]] = set()
+    emitted: set[tuple[str, str]] = set()  # évite les doublons (callee, caller)
     for callee_name in dangerous_imported:
         info = _CATALOGUE_MAP[callee_name]
         sites = call_sites.get(callee_name, [])
 
         if sites:
+            # Regroupe les adresses d'appel par fonction appelante
             by_caller: dict[str, list[int]] = {}
             for addr, caller in sites:
                 by_caller.setdefault(caller, []).append(addr)
@@ -119,7 +129,7 @@ def analyze(binary_path: Path, elf_info: ELFInfo) -> list[Finding]:
                     cwe=info.cwe,
                 ))
         else:
-            # Import visible mais site d'appel non résolu (binaire strippé / appel indirect)
+            # Étape 4 : import PLT visible sans site d'appel résolu (binaire strippé ou appel indirect)
             key = (callee_name, "<import>")
             if key not in emitted:
                 emitted.add(key)
@@ -145,7 +155,11 @@ def _find_call_sites(
     elf_info: ELFInfo,
     dangerous_plt: dict[int, str],
 ) -> dict[str, list[tuple[int, str]]]:
-    """Désassemble les sections exécutables ; collecte les sites CALL ciblant des stubs PLT dangereux."""
+    """Désassemble les sections exécutables et collecte les sites CALL ciblant des stubs PLT dangereux.
+
+    Retourne {nom_callee → [(adresse_call, nom_caller), …]}.
+    md.detail=False suffit ici car on ne lit que l'opérande immédiate via op_str.
+    """
     if not dangerous_plt:
         return {}
 
@@ -154,12 +168,12 @@ def _find_call_sites(
         return {}
 
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    md.detail = False
+    md.detail = False  # pas besoin du détail des opérandes, on lit directement op_str
 
     results: dict[str, list[tuple[int, str]]] = {}
 
     for section in binary.sections:
-        # SHF_EXECINSTR = 0x4
+        # SHF_EXECINSTR = 0x4 : seules les sections de code nous intéressent
         if not (int(section.flags) & 0x4):
             continue
         data = bytes(section.content)
@@ -168,17 +182,19 @@ def _find_call_sites(
         base = section.virtual_address
 
         for insn in md.disasm(data, base):
+            # On ne s'intéresse qu'aux instructions CALL directes (opérande = adresse immédiate)
             if insn.mnemonic not in ("call", "callq"):
                 continue
             try:
                 target = int(insn.op_str, 16)
             except ValueError:
-                continue
+                continue  # CALL indirect (via registre) : non traçable statiquement
 
             callee = dangerous_plt.get(target)
             if callee is None:
                 continue
 
+            # Résout la fonction contenant ce CALL pour identifier le "caller"
             call_site = insn.address
             caller = elf_info.function_at(call_site) or "<unknown>"
             results.setdefault(callee, []).append((call_site, caller))

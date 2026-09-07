@@ -173,6 +173,11 @@ def _payload_generator(
 # ── stratégie : escalade de taille ───────────────────────────────────────────
 
 def _size_escalation() -> Iterator[tuple[str, bytes, list[str]]]:
+    """Génère des charges utiles de taille croissante pour détecter les dépassements de tampon.
+
+    Les tailles 63/64/65 et 127/128/129 encadrent les puissances de deux courantes
+    pour attraper les off-by-one autour des buffers typiques.
+    """
     sizes = [8, 16, 32, 48, 63, 64, 65, 100, 128, 256, 512, 1024, 2048, 4096]
     for size in sizes:
         payload = b"A" * size + b"\n"
@@ -210,6 +215,7 @@ def _debruijn(length: int) -> bytes:
 # ── stratégie : chaîne de format ──────────────────────────────────────────────
 
 def _format_string_payloads() -> Iterator[tuple[str, bytes, list[str]]]:
+    """Génère des sondes de chaîne de format couvrant lecture arbitraire (%x, %p), écriture (%n) et crashs (%s)."""
     probes = [
         b"%x.%x.%x.%x.%x.%x.%x.%x\n",
         b"%p.%p.%p.%p.%p.%p.%p.%p\n",
@@ -275,6 +281,7 @@ _SEEDS = [
 
 
 def _mutation_payloads(rng: random.Random) -> Iterator[tuple[str, bytes, list[str]]]:
+    """Applique 8 mutations aléatoires à chaque entrée de départ pour explorer les cas limites."""
     for seed in _SEEDS:
         for _ in range(8):
             mutated = _mutate(bytearray(seed), rng)

@@ -77,6 +77,7 @@ def save(result: "ScanResult", path: Path) -> None:
 # ── filtres de template ───────────────────────────────────────────────────────
 
 def _severity_order(sev) -> int:
+    """Retourne un entier croissant selon la sévérité, utilisé pour trier les findings du plus grave au moins grave."""
     from vulnscan.report.model import Severity
     return {
         Severity.INFO:     1,
@@ -88,6 +89,7 @@ def _severity_order(sev) -> int:
 
 
 def _severity_class(sev_value: str) -> str:
+    """Convertit une valeur de sévérité en classe CSS correspondante pour la mise en couleur du rapport."""
     return {
         "CRITICAL": "sev-critical",
         "HIGH":     "sev-high",

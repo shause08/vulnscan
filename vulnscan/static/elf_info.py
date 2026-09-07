@@ -16,31 +16,38 @@ logger = get_logger(__name__)
 
 @dataclasses.dataclass
 class Symbol:
+    """Représente un symbole ELF (fonction importée ou définie localement)."""
     name: str
     address: int
-    size: int
-    is_import: bool
+    size: int        # taille en octets ; 0 si non renseignée dans le fichier
+    is_import: bool  # True si le symbole provient d'une bibliothèque externe (PLT)
     is_function: bool
 
 
 @dataclasses.dataclass
 class ELFInfo:
+    """Métadonnées extraites d'un binaire ELF, partagées entre tous les analyseurs statiques."""
     path: str
-    arch: str
-    bits: int
+    arch: str          # "x86-64" | "x86" | "arm" | "aarch64"
+    bits: int          # 32 ou 64
     entry_point: int
-    is_pie: bool
-    imports: list[Symbol]
-    functions: list[Symbol]
-    sections: list[str]
-    # adresse du stub PLT → nom de la fonction (résolu par dangerous_funcs via disasm)
+    is_pie: bool       # True si le fichier est de type DYN (Position-Independent Executable)
+    imports: list[Symbol]    # fonctions importées depuis des bibliothèques partagées
+    functions: list[Symbol]  # fonctions définies dans le binaire (symboles locaux)
+    sections: list[str]      # noms des sections ELF présentes
+    # Table {adresse_stub_PLT → nom_de_fonction}, construite depuis .plt.sec / .plt
     plt_map: dict[int, str]
 
     def import_names(self) -> set[str]:
+        """Retourne l'ensemble des noms de fonctions importées (ex. {"gets", "printf"})."""
         return {s.name for s in self.imports}
 
     def function_at(self, addr: int) -> Optional[str]:
-        """Retourne le nom de la fonction qui contient *addr*, ou None."""
+        """Retourne le nom de la fonction qui contient *addr*, ou None.
+
+        Cherche d'abord par plage exacte [address, address+size[,
+        puis repli sur la fonction dont l'adresse de début est la plus proche par en-dessous.
+        """
         for fn in self.functions:
             if fn.size > 0 and fn.address <= addr < fn.address + fn.size:
                 return fn.name
@@ -54,11 +61,12 @@ class ELFInfo:
 
 
 def parse(binary_path: Path) -> ELFInfo:
-    """Analyse un binaire ELF avec lief et retourne un ELFInfo."""
+    """Analyse un binaire ELF avec lief et retourne un ELFInfo peuplé."""
     binary = lief.parse(str(binary_path))
     if binary is None:
         raise ValueError(f"lief ne peut pas analyser {binary_path}")
 
+    # Mappage des types d'architecture lief vers des chaînes lisibles
     arch_map = {
         ELFT.ARCH.X86_64:  "x86-64",
         ELFT.ARCH.I386:    "x86",
@@ -67,9 +75,10 @@ def parse(binary_path: Path) -> ELFInfo:
     }
     arch = arch_map.get(binary.header.machine_type, str(binary.header.machine_type))
     bits = 64 if binary.header.identity_class == ELFT.Header.CLASS.ELF64 else 32
+    # Un binaire PIE est de type DYN (bibliothèque partagée) pour permettre le chargement à adresse variable
     is_pie = binary.header.file_type == ELFT.Header.FILE_TYPE.DYN
 
-    # Imports PLT : symboles dynamiques marqués comme importés
+    # Imports PLT : symboles dynamiques marqués comme importés (provenant de libc, etc.)
     imports: list[Symbol] = []
     for sym in binary.dynamic_symbols:
         if sym.imported and sym.name:
@@ -81,7 +90,7 @@ def parse(binary_path: Path) -> ELFInfo:
                 is_function=sym.type == ELFT.Symbol.TYPE.FUNC,
             ))
 
-    # Fonctions définies localement (symboles de debug)
+    # Fonctions définies localement — présentes uniquement si le binaire n'est pas strippé
     functions: list[Symbol] = []
     seen: set[str] = set()
     for sym in binary.symbols:
@@ -99,6 +108,7 @@ def parse(binary_path: Path) -> ELFInfo:
             ))
 
     sections = [s.name for s in binary.sections if s.name]
+    # Construction de la PLT map — nécessaire pour résoudre les CALL indirects vers des fonctions dangereuses
     plt_map = _build_plt_map(binary)
 
     logger.debug(
@@ -136,11 +146,11 @@ def _build_plt_map(binary: lief.ELF.Binary) -> dict[int, str]:
         return {}
 
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    md.detail = True
+    md.detail = True   # nécessaire pour accéder aux opérandes et aux registres
 
     plt_map: dict[int, str] = {}
 
-    # Sections contenant les stubs PLT appelables
+    # Parcourt les sections PLT dans l'ordre de priorité : .plt.sec (IBT) > .plt.got > .plt
     for sec_name in (".plt.sec", ".plt.got", ".plt"):
         sec = binary.get_section(sec_name)
         if sec is None:
@@ -148,14 +158,14 @@ def _build_plt_map(binary: lief.ELF.Binary) -> dict[int, str]:
         data = bytes(sec.content)
         base = sec.virtual_address
 
-        # Parcourt les instructions ; un stub commence à un bloc aligné (toutes les 16 octets).
-        # On enregistre l'adresse de début de chaque bloc contenant un jmp-vers-GOT.
+        # Chaque stub occupe un bloc de 16 octets alignés ; on suit le début du bloc courant
         current_stub_start = base
         for insn in md.disasm(data, base):
-            # Nouveau bloc de 16 octets
+            # Nouveau bloc de 16 octets → nouvelle entrée de stub potentielle
             if (insn.address - base) % 16 == 0:
                 current_stub_start = insn.address
 
+            # Seuls les JMP vers la GOT nous intéressent (jmp/bnd jmp à opérande mémoire)
             if insn.mnemonic not in ("jmp", "bnd jmp"):
                 continue
             if not insn.operands:
@@ -164,7 +174,7 @@ def _build_plt_map(binary: lief.ELF.Binary) -> dict[int, str]:
             if op.type != capstone.x86.X86_OP_MEM:
                 continue
 
-            # RIP-relatif : cible = adresse_insn_suivante + déplacement
+            # Calcul de l'adresse GOT : RIP pointe sur l'instruction suivante au moment de l'exécution
             rip = insn.address + insn.size
             got_addr = rip + op.mem.disp
             name = got_slot.get(got_addr)

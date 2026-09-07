@@ -74,30 +74,36 @@ def _is_runtime_frame(func: str) -> bool:
 
 
 class ASanReport:
-    """Représentation structurée d'une erreur ASan."""
+    """Représentation structurée d'une erreur ASan extraite du rapport brut."""
 
     def __init__(self, raw: str) -> None:
+        """Parse le bloc brut ASan dès la construction."""
         self.raw = raw
         self.error_type: str = ""
         self.access_op: str = ""      # "READ" | "WRITE" | ""
         self.access_size: int = 0
-        self.address: str = ""
-        self.frames: list[dict] = []         # frames section primaire (l'accès fautif)
-        self.freed_frames: list[dict] = []   # frames section "freed by"
+        self.address: str = ""        # adresse hexadécimale de l'accès fautif
+        self.frames: list[dict] = []         # frames de la section primaire (l'accès qui a crashé)
+        self.freed_frames: list[dict] = []   # frames de la section "freed by" (utile pour UAF)
         self._parse()
 
     @staticmethod
     def _extract_frames(text: str) -> list[dict]:
-        """Extrait les frames ASan d'un bloc de texte, triés par index."""
+        """Extrait et trie par index les frames ASan présentes dans *text*.
+
+        Supprime les codes couleur ANSI éventuels des localisations (fichier:ligne).
+        """
         frames = []
         for m in _RE_FRAME.finditer(text):
             loc = m.group(3).strip()
+            # Certaines versions d'ASan émettent des codes couleur même avec color=never
             loc = re.sub(r"\x1b\[[0-9;]*m", "", loc)
             frames.append({
                 "idx":      int(m.group(1)),
                 "func":     m.group(2),
                 "location": loc,
             })
+        # Tri par index : garantit l'ordre #0, #1, #2… même si la regex les trouve dans un autre ordre
         frames.sort(key=lambda f: f["idx"])
         return frames
 
@@ -137,6 +143,7 @@ class ASanReport:
 
     @property
     def is_valid(self) -> bool:
+        """Retourne True si le rapport contient un type d'erreur reconnu (pas un bloc vide ou malformé)."""
         return bool(self.error_type)
 
     @property
@@ -201,8 +208,12 @@ class ASanReport:
 
 
 def parse_output(text: str) -> list[ASanReport]:
-    """Découpe la sortie ASan multi-erreurs en objets ASanReport individuels."""
-    # Chaque bloc d'erreur commence par "==PID==ERROR:"
+    """Découpe la sortie ASan (potentiellement multi-erreurs) en objets ASanReport individuels.
+
+    Chaque bloc d'erreur commence par "==PID==ERROR:" ; le split sur ce pattern
+    permet de gérer les binaires qui produisent plusieurs erreurs ASan lors d'une même exécution.
+    """
+    # Le lookahead (?=…) conserve le délimiteur dans le bloc suivant
     blocks = re.split(r"(?====\d+==ERROR:)", text)
     reports = []
     for block in blocks:
