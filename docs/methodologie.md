@@ -23,7 +23,7 @@ Binaire ELF
     │        └─ Triage GDB            (RIP, offset, exploitability)
     │
     └─→ [5] Corrélation + Rapport
-             (JSON + HTML Jinja2)
+             (HTML Jinja2)
 ```
 
 ## Phase 1 — Parsing ELF

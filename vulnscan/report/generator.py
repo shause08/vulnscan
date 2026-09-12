@@ -1,15 +1,13 @@
-"""Générateur de rapports : sérialisation JSON + rendu HTML via Jinja2.
+"""Générateur de rapports HTML via Jinja2.
 
 Points d'entrée
 ---------------
-render_json(result)  → str   (JSON indenté)
 render_html(result)  → str   (HTML autonome, sans ressources externes)
 save(result, path)   → écrit le rapport HTML sur le disque
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,13 +15,6 @@ if TYPE_CHECKING:
     from vulnscan.report.model import ScanResult
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
-
-# ── JSON ──────────────────────────────────────────────────────────────────────
-
-def render_json(result: "ScanResult") -> str:
-    """Sérialise *result* en JSON indenté."""
-    return json.dumps(result.as_dict(), indent=2, ensure_ascii=False)
-
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 

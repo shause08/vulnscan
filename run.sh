@@ -55,7 +55,7 @@ echo ""
 
 # ── corpus build ─────────────────────────────────────────────────────────────
 echo -e "${BOLD}[2/3] Building corpus…${RESET}"
-make -C corpus vuln asan --no-print-directory 2>&1 | grep -E "^(gcc|make|cc|warning|error)" || true
+make -C corpus vuln --no-print-directory 2>&1 | grep -E "^(gcc|make|cc|warning|error)" || true
 echo -e "  ${GREEN}✓${RESET} Corpus built in corpus/bin/"
 echo ""
 
@@ -68,8 +68,8 @@ BINARIES=(
   heap_bof_vuln
   format_string_vuln
   integer_overflow_vuln
-  uaf_vuln
-  off_by_one_vuln
+  strcpy_bof_vuln
+  heap_overflow_vuln
 )
 
 PASS=0

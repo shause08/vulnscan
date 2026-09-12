@@ -50,8 +50,8 @@ Binaries land in `corpus/bin/`.
 ## Usage
 
 ```bash
-# Full scan (static + dynamic), JSON + HTML report
-vulnscan scan corpus/bin/stack_bof_vuln --html --out reports/stack_bof.json
+# Full scan (static + dynamic), HTML report
+vulnscan scan corpus/bin/stack_bof_vuln --out reports/stack_bof.html
 
 # Static analysis only (fast, no binary execution)
 vulnscan scan corpus/bin/heap_bof_vuln --no-dynamic
@@ -60,7 +60,7 @@ vulnscan scan corpus/bin/heap_bof_vuln --no-dynamic
 vulnscan scan corpus/bin/format_string_vuln --no-static
 
 # Longer timeout for complex binaries
-vulnscan scan corpus/bin/integer_overflow_vuln --timeout 60 --html
+vulnscan scan corpus/bin/integer_overflow_vuln --timeout 60
 
 # Verify system dependencies
 vulnscan check-deps
@@ -68,15 +68,12 @@ vulnscan check-deps
 
 ### Output
 
-**JSON** (`--out FILE`): machine-readable report with all findings, protections,
-and summary counts.
+**HTML** (`--out FILE`, défaut: `report.html`): rapport autonome dark-theme avec :
+- Cartes de résumé par sévérité (CRITICAL / HIGH / MEDIUM / LOW / INFO)
+- Matrice de protections (NX, Canary, RELRO, PIE, Fortify, RPATH)
+- Table des findings triée par sévérité avec preuve, CWE, confiance
 
-**HTML** (`--html`): self-contained dark-theme report with:
-- Severity summary cards (CRITICAL / HIGH / MEDIUM / LOW / INFO)
-- Protection matrix (NX, Canary, RELRO, PIE, Fortify, RPATH)
-- Findings table sorted by severity with evidence, CWE, confidence
-
-**Terminal**: text summary printed after every scan.
+**Terminal**: résumé texte affiché après chaque scan.
 
 ## Demo
 
@@ -85,7 +82,7 @@ and summary counts.
 ```
 
 Builds the full corpus, scans all 6 `_vuln` binaries with both static and dynamic
-analysis, writes JSON + HTML reports to `reports/`. Accepts `--no-dynamic` and
+analysis, writes les rapports HTML dans `reports/`. Accepts `--no-dynamic` and
 `--timeout N`.
 
 ## Architecture
@@ -106,7 +103,7 @@ vulnscan/
 │   └── triage.py         # GDB batch triage, RIP offset, severity engine
 ├── report/
 │   ├── model.py          # dataclasses: Finding, Protection, ScanResult
-│   ├── generator.py      # render_json(), render_html(), save()
+│   ├── generator.py      # render_html(), save()
 │   └── templates/
 │       └── report.html.j2# Jinja2 dark-theme HTML template
 └── utils/
@@ -128,7 +125,7 @@ tests/
 ├── test_phase3_advanced.py# disasm, taint, pipeline
 ├── test_phase4_dynamic.py # runner, fuzzer, pipeline dynamic
 ├── test_phase5_triage.py  # GDB triage, severity engine
-└── test_phase6_report.py  # JSON/HTML generation, CLI output
+└── test_phase6_report.py  # HTML generation, CLI output
 ```
 
 ## Tests
@@ -148,7 +145,7 @@ tests/
 
 - [Méthodologie](docs/methodologie.md) — pipeline architecture, detection methods per phase
 - [Algorithmes](docs/algorithmes.md) — PLT resolution, taint tracking, cyclic offset, severity formula
-- [Résultats](docs/resultats.md) — real findings on the 6 corpus binaries
+- [Résultats](docs/resultats.md) — findings réels sur les 6 binaires du corpus
 - [Limites](docs/limites.md) — known limitations, false positive patterns, scope boundaries
 
 ## Detection pipeline summary
