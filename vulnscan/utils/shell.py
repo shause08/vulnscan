@@ -12,8 +12,6 @@ logger = get_logger(__name__)
 
 _DEFAULT_TIMEOUT = 30
 # Limite l'espace d'adressage virtuel à 256 Mio pour contenir les processus fils potentiellement hostiles.
-# Note : cette limite est incompatible avec ASan (qui mappe ~16× l'espace du processus) ;
-# run_asan() dans runner.py passe limit_resources=False pour cette raison.
 _AS_LIMIT = 256 * 1024 * 1024
 
 

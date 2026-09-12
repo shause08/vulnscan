@@ -50,7 +50,7 @@ class RunResult:
     timed_out: bool
     crashed: bool
     duration_s: float
-    env_vars: dict[str, str]          # variables d'env supplémentaires (ex. ASAN_OPTIONS)
+    env_vars: dict[str, str]          # variables d'env supplémentaires
 
     @property
     def crash_summary(self) -> str:
@@ -131,34 +131,6 @@ def run(
         crashed=crashed,
         duration_s=round(duration, 3),
         env_vars=env_vars or {},
-    )
-
-
-def run_asan(
-    binary_path: Path,
-    *,
-    stdin_data: bytes = b"",
-    argv_extra: list[str] | None = None,
-    timeout: int = 15,
-) -> RunResult:
-    """Exécute un binaire instrumenté par ASan et capture son rapport d'erreur complet.
-
-    ASan mappe une grande région de mémoire fantôme (~16× l'AS du processus), donc
-    RLIMIT_AS ne doit PAS être appliqué ici ; le binaire est déjà instrumenté et sandboxé.
-    """
-    asan_opts = (
-        "detect_leaks=0:"
-        "abort_on_error=1:"
-        "symbolize=1:"
-        "color=never"
-    )
-    return run(
-        binary_path,
-        stdin_data=stdin_data,
-        argv_extra=argv_extra,
-        timeout=timeout,
-        env_vars={"ASAN_OPTIONS": asan_opts},
-        limit_resources=False,   # ASan nécessite un grand espace d'adressage virtuel
     )
 
 

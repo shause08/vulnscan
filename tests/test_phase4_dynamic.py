@@ -71,14 +71,6 @@ class TestRunner:
         assert isinstance(r.duration_s, float)
         assert r.duration_s >= 0
 
-    def test_run_asan_binary(self):
-        from vulnscan.dynamic.runner import run_asan
-        r = run_asan(_req("stack_bof_asan"), stdin_data=b"A" * 200 + b"\n", timeout=10)
-        combined = r.stdout + r.stderr
-        assert b"AddressSanitizer" in combined or b"ERROR" in combined
-        # ASan detects the bug and exits with non-zero code (rc=1) or a signal
-        assert r.crashed or r.returncode != 0
-
     def test_missing_binary_raises(self):
         from vulnscan.dynamic.runner import run
         with pytest.raises(FileNotFoundError):

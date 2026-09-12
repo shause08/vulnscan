@@ -1,4 +1,4 @@
-"""Phase 1 — corpus build and basic crash/ASan detection tests."""
+"""Phase 1 — corpus build and basic crash detection tests."""
 
 import subprocess
 import sys
@@ -18,23 +18,13 @@ VULN_BINARIES = [
     "off_by_one_vuln",
 ]
 
-ASAN_BINARIES = [
-    "stack_bof_asan",
-    "heap_bof_asan",
-    "format_string_asan",
-    "integer_overflow_asan",
-    "uaf_asan",
-    "off_by_one_asan",
-]
-
-
 def _bin(name: str) -> Path:
     return CORPUS_BIN / name
 
 
 # ── Existence ─────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("name", VULN_BINARIES + ASAN_BINARIES)
+@pytest.mark.parametrize("name", VULN_BINARIES)
 def test_binary_exists(name: str):
     assert _bin(name).exists(), f"Binary not found: {name} — run 'make -C corpus all'"
 
@@ -89,44 +79,3 @@ def test_off_by_one_crashes_or_runs():
     assert r.returncode is not None
 
 
-# ── ASan detection ─────────────────────────────────────────────────────────────
-
-def _asan_output(name: str, args: list[str] = [], stdin: bytes = b"") -> str:
-    r = subprocess.run(
-        [str(_bin(name))] + args,
-        input=stdin,
-        capture_output=True, timeout=10,
-    )
-    return (r.stdout + r.stderr).decode(errors="replace")
-
-
-def test_stack_bof_asan_detects():
-    out = _asan_output("stack_bof_asan", stdin=b"A" * 200)
-    assert "stack-buffer-overflow" in out
-
-
-def test_heap_bof_asan_detects():
-    out = _asan_output("heap_bof_asan", args=["200"], stdin=b"B" * 200)
-    assert "heap-buffer-overflow" in out
-
-
-def test_format_string_asan_runs():
-    # ASan won't catch format-string reads — check that the binary runs cleanly
-    out = _asan_output("format_string_asan", stdin=b"hello\n")
-    assert "ERROR" not in out
-
-
-def test_integer_overflow_asan_detects():
-    payload = b"C" * (4097 * 64)
-    out = _asan_output("integer_overflow_asan", args=["4097"], stdin=payload)
-    assert "heap-buffer-overflow" in out
-
-
-def test_uaf_asan_detects():
-    out = _asan_output("uaf_asan")
-    assert "heap-use-after-free" in out
-
-
-def test_off_by_one_asan_detects():
-    out = _asan_output("off_by_one_asan", stdin=b"D" * 64 + b"\n")
-    assert "stack-buffer-overflow" in out

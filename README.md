@@ -7,11 +7,11 @@ Detects **6 vulnerability classes** via combined static and dynamic analysis:
 | Class | CWE | Detection |
 |-------|-----|-----------|
 | Stack buffer overflow | CWE-121 | Static (disasm + taint) + Dynamic (fuzzer + GDB triage) |
-| Heap buffer overflow | CWE-122 | Static (frame analysis) + Dynamic (ASan) |
+| Heap buffer overflow | CWE-122 | Static (frame analysis) + Dynamic (fuzzer) |
 | Format string | CWE-134 | Static (dangerous func + taint) + Dynamic (fuzzer) |
 | Integer overflow | CWE-190 | Static (consequence: heap BOF) + Dynamic (boundary fuzzing) |
-| Use-after-free | CWE-416 | Dynamic (ASan) |
-| Off-by-one | CWE-193 | Dynamic (ASan) |
+| Use-after-free | CWE-416 | Static (limited: intra-procedural only) |
+| Off-by-one | CWE-193 | Static (limited: intra-procedural only) |
 
 > **Security note:** Dynamic analysis executes potentially hostile binaries.
 > Run in a VM or container. Resource limits (`RLIMIT_AS`, `RLIMIT_CPU`) are
@@ -39,14 +39,12 @@ pip install -e .
 
 ## Build the corpus
 
-The corpus contains 6 intentionally vulnerable C programs, each compiled in three
-variants: `_normal` (default protections), `_vuln` (all protections disabled),
-`_asan` (AddressSanitizer + debug info).
+The corpus contains 6 intentionally vulnerable C programs, each compiled in two
+variants: `_normal` (default protections), `_vuln` (all protections disabled).
 
 ```bash
-make -C corpus all      # all three variants
+make -C corpus all      # all variants
 make -C corpus vuln     # only _vuln builds (scanner target)
-make -C corpus asan     # only _asan builds (triage target)
 ```
 
 Binaries land in `corpus/bin/`.
@@ -107,8 +105,7 @@ vulnscan/
 ├── dynamic/
 │   ├── runner.py         # safe subprocess executor (RLIMIT_AS/CPU/CORE)
 │   ├── fuzzer.py         # 5 strategies: size, cyclic, format, int-boundary
-│   ├── triage.py         # GDB batch triage, RIP offset, severity engine
-│   └── asan.py           # ASan output parser → Finding
+│   └── triage.py         # GDB batch triage, RIP offset, severity engine
 ├── report/
 │   ├── model.py          # dataclasses: Finding, Protection, ScanResult
 │   ├── generator.py      # render_json(), render_html(), save()
@@ -127,19 +124,19 @@ docs/
 ├── resultats.md          # real scan results on the corpus
 └── limites.md            # known limitations and false-positive patterns
 tests/
-├── test_phase0.py        # CLI, shell wrapper, data model (8 tests)
-├── test_phase1_corpus.py # corpus binaries, crash detection, ASan (23 tests)
-├── test_phase2_static.py # ELFInfo, protections, dangerous funcs (28 tests)
-├── test_phase3_advanced.py# disasm, taint, pipeline (18 tests)
-├── test_phase4_dynamic.py # runner, fuzzer, pipeline dynamic (23 tests)
-├── test_phase5_triage.py  # ASan parser, GDB triage, severity (60 tests)
-└── test_phase6_report.py  # JSON/HTML generation, CLI output (38 tests)
+├── test_phase0.py        # CLI, shell wrapper, data model
+├── test_phase1_corpus.py # corpus binaries, crash detection
+├── test_phase2_static.py # ELFInfo, protections, dangerous funcs
+├── test_phase3_advanced.py# disasm, taint, pipeline
+├── test_phase4_dynamic.py # runner, fuzzer, pipeline dynamic
+├── test_phase5_triage.py  # GDB triage, severity engine
+└── test_phase6_report.py  # JSON/HTML generation, CLI output
 ```
 
 ## Tests
 
 ```bash
-# All tests (198 total)
+# All tests
 .venv/bin/pytest tests/ -v
 
 # Fast tests only (no binary execution)
@@ -168,8 +165,7 @@ ELF binary
  ├─► Taint tracking               gets/read → strcpy/printf/system
  │
  ├─► Fuzzer (5 strategies)        cyclic, size escalation, %n, int-boundary
- ├─► GDB triage                   RIP value, offset, exploitability
- └─► ASan build                   stack/heap BOF, UAF, off-by-one
+ └─► GDB triage                   RIP value, offset, exploitability
       │
       └─► Merge findings          static + dynamic → confidence="both"
            └─► Severity engine    class × exploitability × offset × protections

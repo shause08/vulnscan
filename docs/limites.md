@@ -12,7 +12,7 @@ vulnscan effectue une analyse **intra-procédurale** uniquement. Il ne suit pas 
 
 ### Pas de modélisation du tas
 
-L'analyse ne suit pas les allocations et libérations de mémoire dynamique. Les vulnérabilités de type heap-use-after-free, double-free et heap buffer overflow ne sont détectées que par inférence sur la taille des arguments (`memcpy` avec longueur non-constante) ou via ASan dynamiquement.
+L'analyse ne suit pas les allocations et libérations de mémoire dynamique. Les vulnérabilités de type heap-use-after-free, double-free et heap buffer overflow ne sont détectées que par inférence sur la taille des arguments (`memcpy` avec longueur non-constante).
 
 ### Portée limitée au code x86-64
 
@@ -52,17 +52,13 @@ La majorité des stratégies de fuzzing ciblent stdin. Les vulnérabilités déc
 
 ### Détection UAF et off-by-one silencieux
 
-Les vulnérabilités UAF ne produisent un crash immédiat dans glibc qu'en présence d'ASan. Sans le build `*_asan`, un use-after-free peut silencieusement utiliser de la mémoire recyclée sans SIGSEGV. De même, un off-by-one qui n'écrase que l'octet de poids faible du saved RBP ne provoque pas de crash dans le binaire non instrumenté.
+Les vulnérabilités UAF ne produisent pas de crash immédiat dans le binaire non instrumenté : un use-after-free peut silencieusement utiliser de la mémoire recyclée sans SIGSEGV. De même, un off-by-one qui n'écrase que l'octet de poids faible du saved RBP ne provoque pas de crash détectable par le fuzzer.
 
-vulnscan atténue cette limite via les **entrées baseline ASan** (`b""`, 63-129 octets) qui sont toujours soumises au binaire ASan même sans crash du fuzzer. Cependant, si le build `*_asan` est absent, ces bugs ne sont pas détectés.
+Ces bugs ne sont donc pas détectés dynamiquement par vulnscan. Seule l'analyse statique (inférence sur les appels à des fonctions dangereuses) peut les révéler partiellement.
 
 ### Heap overflow sans crash immédiat
 
 Un heap overflow dans glibc peut ne pas provoquer de SIGSEGV immédiat : le bloc de métadonnées corrompu n'est détecté qu'au prochain `malloc`/`free`. Le fuzzer peut donc ne pas détecter le crash pour les binaires non instrumentés.
-
-### RLIMIT_AS incompatible avec ASan
-
-Les limites de ressources (`RLIMIT_AS = 256 MiB`) ne peuvent pas être appliquées aux builds ASan : ASan mappe ~16× l'espace d'adressage du processus pour sa shadow memory. Les builds ASan s'exécutent donc sans sandbox mémoire.
 
 ### Timeout et couverture
 

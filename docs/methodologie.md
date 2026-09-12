@@ -20,8 +20,7 @@ Binaire ELF
     │
     ├─→ [4] Analyse dynamique
     │        ├─ Fuzzing               (5 stratégies, pwntools cyclic)
-    │        ├─ Triage GDB            (RIP, offset, exploitability)
-    │        └─ ASan                  (build instrumenté, entrées baseline + crashes)
+    │        └─ Triage GDB            (RIP, offset, exploitability)
     │
     └─→ [5] Corrélation + Rapport
              (JSON + HTML Jinja2)
@@ -143,39 +142,13 @@ La valeur au RSP (pas le RIP courant qui pointe sur `ret`) est utilisée pour l'
 
 L'offset vers RIP est calculé via `pwntools.cyclic_find(rsp_value & 0xFFFFFFFF)`.
 
-### 4c. ASan (asan.py)
-
-vulnscan cherche un binaire `*_asan` juxtaposé au binaire `*_vuln` analysé. Si trouvé, il le lance avec :
-
-```
-ASAN_OPTIONS=detect_leaks=0:abort_on_error=1:symbolize=1:color=never
-```
-
-**Deux sources d'entrées sont utilisées :**
-
-1. **Entrées crashantes** découvertes par le fuzzer (une par groupe de stratégie)
-2. **Entrées baseline** systématiques, toujours envoyées indépendamment du fuzzer :
-
-```python
-_ASAN_BASELINE = [b"", b"A"*63+b"\n", b"A"*64+b"\n", b"A"*65+b"\n",
-                  b"A"*127+b"\n", b"A"*128+b"\n", b"A"*129+b"\n"]
-```
-
-L'entrée vide détecte les bugs qui se produisent sans entrée (UAF dont la victime est initialisée à l'entrée dans `main`). Les tailles autour de 64 et 128 couvrent les off-by-one typiques.
-
-Les limites de ressources (`RLIMIT_AS`) sont désactivées pour les builds ASan, qui ont besoin de ~16× l'espace d'adressage du processus pour la shadow memory.
-
-**Parsing du rapport ASan :**
-
-La sortie ASan contient plusieurs sections de backtrace (accès fautif, `freed by`, `previously allocated`). Le parseur isole la **section primaire** (arrêt au premier marqueur secondaire) pour garantir que le backtrace affiché correspond exactement à l'endroit du bug, sans mélange de frames entre sections. Les frames internes aux runtimes (`__sanitizer::`, `__interceptor_`, `_start`, etc.) sont filtrées.
-
 ## Phase 5 — Corrélation et sévérité
 
 ### Corrélation statique + dynamique
 
 Lorsque l'analyse statique et l'analyse dynamique détectent la **même classe** de vulnérabilité, la confiance est élevée à `"both"`. Cela identifie les findings les plus fiables.
 
-La déduplication s'applique uniquement aux findings **dynamiques** : plusieurs exécutions ASan avec des entrées différentes peuvent remonter le même bug ; seul le finding de meilleure confiance puis sévérité est conservé. Les findings statiques sont tous conservés car chaque analyseur (dangerous_funcs, disasm, taint) apporte une preuve distincte.
+La déduplication s'applique uniquement aux findings **dynamiques** : plusieurs exécutions du fuzzer peuvent remonter le même bug ; seul le finding de meilleure confiance puis sévérité est conservé. Les findings statiques sont tous conservés car chaque analyseur (dangerous_funcs, disasm, taint) apporte une preuve distincte.
 
 ### Moteur de sévérité
 

@@ -67,10 +67,9 @@ def _run_dynamic(
     protections: Protection,
     timeout: int = 30,
 ) -> list[Finding]:
-    """Fuzzing → triage des crashes → exécution ASan → fusion des résultats."""
+    """Fuzzing → triage des crashes → résultats."""
     from vulnscan.dynamic.fuzzer import fuzz, CrashResult
     from vulnscan.dynamic.triage import triage, estimate_severity
-    from vulnscan.dynamic import asan as asan_mod
 
     findings: list[Finding] = []
 
@@ -137,39 +136,6 @@ def _run_dynamic(
             evidence=evidence,
         ))
 
-    # ── 3. Exécution du binaire ASan (s'il existe à côté du binaire vuln) ────
-    asan_binary = _find_asan_sibling(binary)
-    if asan_binary:
-        logger.info("[dynamic] Exécution ASan : %s", asan_binary.name)
-        asan_inputs = _collect_asan_inputs(fuzz_report)
-        # Entrées baseline : détecte les bugs qui ne crashent pas le fuzzer
-        # (UAF, off-by-one sur RBP, global-buffer-overflow…).
-        # Les tailles couvrent les off-by-one autour des buffers de 64 et 128 octets.
-        for _b in _ASAN_BASELINE:
-            if not any(_b == inp for inp, _ in asan_inputs):
-                asan_inputs.append((_b, None))
-        for stdin_data, argv_extra in asan_inputs:
-            try:
-                asan_findings = asan_mod.run_and_parse(
-                    asan_binary,
-                    stdin_data=stdin_data,
-                    argv_extra=argv_extra,
-                    timeout=min(timeout, 15),
-                )
-                for f in asan_findings:
-                    # Élève la sévérité si la même classe a déjà été trouvée par le fuzzer
-                    if any(
-                        existing.vuln_class == f.vuln_class
-                        for existing in findings
-                        if existing.analysis == "dynamic"
-                    ):
-                        f = _with_confidence(f, "both")
-                    findings.append(f)
-            except Exception as exc:
-                logger.warning("[dynamic] Exécution ASan échouée : %s", exc)
-    else:
-        logger.debug("[dynamic] Pas de binaire ASan trouvé pour %s", binary.name)
-
     return findings
 
 
@@ -231,7 +197,7 @@ def _run_static(binary: Path, protections_out: Protection) -> list[Finding]:
 
 def _merge_findings(findings: list[Finding]) -> list[Finding]:
     """Élève la confiance à 'both' quand statique + dynamique partagent une classe de vulnérabilité,
-    puis déduplique les findings identiques issus de plusieurs runs ASan/fuzzer."""
+    puis déduplique les findings dynamiques identiques issus de plusieurs runs du fuzzer."""
     import dataclasses as _dc
 
     static_classes  = {f.vuln_class for f in findings if f.analysis == "static"}
@@ -289,42 +255,3 @@ def _strategy_to_vc(strategy: str) -> VulnClass:
     return VulnClass.STACK_BOF
 
 
-def _find_asan_sibling(binary: Path) -> Path | None:
-    """Cherche un binaire _asan à côté du binaire vuln."""
-    name = binary.name
-    # ex. stack_bof_vuln → stack_bof_asan
-    asan_name = name.replace("_vuln", "_asan").replace("_normal", "_asan")
-    if asan_name == name:
-        return None
-    candidate = binary.parent / asan_name
-    return candidate if candidate.exists() else None
-
-
-def _collect_asan_inputs(fuzz_report) -> list[tuple[bytes, list[str] | None]]:
-    """Collecte une entrée représentative par stratégie de crash pour les exécutions ASan."""
-    seen: set[str] = set()
-    inputs = []
-    for crash in fuzz_report.crashes:
-        key = _strategy_group(crash.strategy)
-        if key not in seen:
-            seen.add(key)
-            inputs.append((crash.stdin_data, crash.argv_extra or None))
-    return inputs
-
-
-def _with_confidence(f: Finding, confidence: str) -> Finding:
-    import dataclasses
-    return dataclasses.replace(f, confidence=confidence)
-
-
-# Entrées ASan systématiques : couvrent les off-by-one et les bugs sans entrée spécifique.
-# Tailles choisies autour des puissances de 2 courantes (64, 128, 256).
-_ASAN_BASELINE: list[bytes] = [
-    b"",
-    b"A" * 63 + b"\n",
-    b"A" * 64 + b"\n",
-    b"A" * 65 + b"\n",
-    b"A" * 127 + b"\n",
-    b"A" * 128 + b"\n",
-    b"A" * 129 + b"\n",
-]
