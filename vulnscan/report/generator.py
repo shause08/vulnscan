@@ -123,14 +123,6 @@ _VULN_EXPLAIN = {
         "Dépassement d'un entier produisant une valeur tronquée utilisée comme taille "
         "d'allocation ou indice — mène généralement à un buffer overflow secondaire."
     ),
-    "use-after-free": (
-        "Accès à une zone mémoire après sa libération — un attaquant contrôlant "
-        "l'allocateur peut substituer un objet malveillant et provoquer une exécution de code."
-    ),
-    "off-by-one": (
-        "Dépassement d'un seul octet au-delà d'un tampon — suffit pour corrompre "
-        "l'octet de longueur d'un chunk voisin ou un pointeur de pile adjacent."
-    ),
 }
 
 
@@ -150,11 +142,9 @@ def _compute_impact(result: "ScanResult") -> list[dict]:
     p = result.protections
     classes = {f.vuln_class for f in result.findings}
 
-    has_stack_bof = bool(classes & {VulnClass.STACK_BOF, VulnClass.OFF_BY_ONE})
-    has_any_bof   = bool(classes & {VulnClass.STACK_BOF, VulnClass.HEAP_BOF,
-                                    VulnClass.OFF_BY_ONE})
+    has_stack_bof = VulnClass.STACK_BOF in classes
+    has_any_bof   = bool(classes & {VulnClass.STACK_BOF, VulnClass.HEAP_BOF})
     has_fmt       = VulnClass.FORMAT_STRING in classes
-    has_uaf       = VulnClass.USE_AFTER_FREE in classes
 
     items: list[dict] = []
 
@@ -164,9 +154,9 @@ def _compute_impact(result: "ScanResult") -> list[dict]:
             "level": "critical",
             "title": "Pas de stack canary — adresse de retour non protégée",
             "description": (
-                "Les dépassements de tampon sur la pile et les vulnérabilités off-by-one peuvent "
-                "écraser directement l'adresse de retour sauvegardée sans déclencher aucune "
-                "vérification. L'exploitation est directe une fois l'offset vers RIP connu."
+                "Les dépassements de tampon sur la pile peuvent écraser directement "
+                "l'adresse de retour sauvegardée sans déclencher aucune vérification. "
+                "L'exploitation est directe une fois l'offset vers RIP connu."
             ),
         })
 
@@ -251,17 +241,6 @@ def _compute_impact(result: "ScanResult") -> list[dict]:
             ),
         })
 
-    if has_uaf and not p.pie:
-        items.append({
-            "level": "high",
-            "title": "Use-after-free avec adresses fixes",
-            "description": (
-                "Une vulnérabilité use-after-free a été détectée. Sans PIE, les métadonnées de "
-                "l'allocateur de tas et les adresses de chunks libérés sont plus prévisibles, "
-                "facilitant le heap grooming et les attaques par confusion de types."
-            ),
-        })
-
     # ── protections actives ───────────────────────────────────────────────────
     if p.canary:
         items.append({
@@ -270,9 +249,7 @@ def _compute_impact(result: "ScanResult") -> list[dict]:
             "description": (
                 "Un cookie secret est placé entre les variables locales et l'adresse de retour "
                 "sauvegardée. Tout dépassement de pile qui l'atteint corrompt le canary et "
-                "déclenche l'arrêt du processus avant exploitation. Les dépassements n'atteignant "
-                "pas l'adresse de retour (ex. off-by-one sur variables adjacentes) peuvent "
-                "rester exploitables."
+                "déclenche l'arrêt du processus avant exploitation."
             ),
         })
 

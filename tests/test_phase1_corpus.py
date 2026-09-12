@@ -14,8 +14,8 @@ VULN_BINARIES = [
     "heap_bof_vuln",
     "format_string_vuln",
     "integer_overflow_vuln",
-    "uaf_vuln",
-    "off_by_one_vuln",
+    "strcpy_bof_vuln",
+    "heap_overflow_vuln",
 ]
 
 def _bin(name: str) -> Path:
@@ -61,21 +61,23 @@ def test_format_string_runs():
     assert b"%x%x%x%x" not in r.stdout  # format specifiers were interpreted
 
 
-def test_uaf_runs():
+def test_strcpy_bof_crashes():
     r = subprocess.run(
-        [str(_bin("uaf_vuln"))],
+        [str(_bin("strcpy_bof_vuln"))],
+        input=b"A" * 100 + b"\n",
         capture_output=True, timeout=5,
     )
-    # May or may not crash depending on allocator behaviour; just ensure it exits
-    assert r.returncode is not None
+    assert r.returncode != 0, "strcpy_bof should crash on 100-byte input (buf=32)"
 
 
-def test_off_by_one_crashes_or_runs():
+def test_heap_overflow_runs():
     r = subprocess.run(
-        [str(_bin("off_by_one_vuln"))],
-        input=b"D" * 64 + b"\n",
+        [str(_bin("heap_overflow_vuln"))],
+        input=b"10\nHelloWorld\n",
         capture_output=True, timeout=5,
     )
+    # small copy should complete normally
     assert r.returncode is not None
+
 
 

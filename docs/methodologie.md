@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble
 
-vulnscan combine deux grandes familles d'analyse — statique et dynamique — pour détecter six classes de vulnérabilités dans des binaires ELF x86-64 Linux. L'outil suit un pipeline en cinq étapes, chaque étape enrichissant la connaissance accumulée sur le binaire cible.
+vulnscan combine deux grandes familles d'analyse — statique et dynamique — pour détecter quatre classes de vulnérabilités dans des binaires ELF x86-64 Linux. L'outil suit un pipeline en cinq étapes, chaque étape enrichissant la connaissance accumulée sur le binaire cible.
 
 ```
 Binaire ELF
@@ -163,8 +163,8 @@ score = base[vuln_class]
 | Classe | Base |
 |--------|------|
 | STACK_BOF | 4 |
-| HEAP_BOF, FORMAT_STRING, UAF | 3 |
-| INTEGER_OVERFLOW, OFF_BY_ONE | 2 |
+| HEAP_BOF, FORMAT_STRING | 3 |
+| INTEGER_OVERFLOW | 2 |
 | UNKNOWN | 1 |
 
 Ajustements : +2 EXPLOITABLE, +1 PROBABLY_EXPLOITABLE, −1 PROBABLY_NOT.  

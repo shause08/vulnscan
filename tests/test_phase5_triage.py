@@ -287,13 +287,6 @@ class TestPipelineTriage:
         both_findings = [f for f in result.findings if f.confidence == "both"]
         assert both_findings, "At least one finding should have confidence='both'"
 
-    def test_uaf_pipeline_runs_without_error(self):
-        """uaf_vuln ne produit pas de crash fuzzer — le pipeline doit s'exécuter sans exception."""
-        from vulnscan.pipeline import scan
-        result = scan(_req("uaf_vuln"), do_static=True, do_dynamic=True, timeout=60)
-        assert result is not None
-        assert isinstance(result.findings, list)
-
     def test_scan_result_fields_populated(self):
         from vulnscan.pipeline import scan
         result = scan(_req("stack_bof_vuln"), do_static=True, do_dynamic=True, timeout=60)

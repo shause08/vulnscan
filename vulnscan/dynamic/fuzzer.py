@@ -176,7 +176,7 @@ def _size_escalation() -> Iterator[tuple[str, bytes, list[str]]]:
     """Génère des charges utiles de taille croissante pour détecter les dépassements de tampon.
 
     Les tailles 63/64/65 et 127/128/129 encadrent les puissances de deux courantes
-    pour attraper les off-by-one autour des buffers typiques.
+    pour déclencher les dépassements de tampon autour des buffers typiques.
     """
     sizes = [8, 16, 32, 48, 63, 64, 65, 100, 128, 256, 512, 1024, 2048, 4096]
     for size in sizes:

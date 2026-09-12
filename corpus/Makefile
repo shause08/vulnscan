@@ -2,7 +2,7 @@ CC      := gcc
 SRCDIR  := src
 BINDIR  := bin
 
-SRCS := stack_bof heap_bof format_string integer_overflow uaf off_by_one
+SRCS := stack_bof heap_bof format_string integer_overflow strcpy_bof heap_overflow
 
 # ── Compiler flags ────────────────────────────────────────────────────────────
 

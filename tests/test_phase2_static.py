@@ -184,7 +184,7 @@ class TestDangerousFuncs:
         from vulnscan.static.elf_info import parse
         from vulnscan.static.dangerous_funcs import analyze
         for name in ["stack_bof_vuln", "heap_bof_vuln", "format_string_vuln",
-                     "integer_overflow_vuln", "uaf_vuln", "off_by_one_vuln"]:
+                     "integer_overflow_vuln", "strcpy_bof_vuln", "heap_overflow_vuln"]:
             p = _req(name)
             try:
                 findings = analyze(p, parse(p))

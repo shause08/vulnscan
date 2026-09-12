@@ -2,7 +2,7 @@
 
 Automated low-level vulnerability scanner for ELF binaries (Linux x86-64).
 
-Detects **6 vulnerability classes** via combined static and dynamic analysis:
+Detects **4 vulnerability classes** via combined static and dynamic analysis:
 
 | Class | CWE | Detection |
 |-------|-----|-----------|
@@ -10,8 +10,6 @@ Detects **6 vulnerability classes** via combined static and dynamic analysis:
 | Heap buffer overflow | CWE-122 | Static (frame analysis) + Dynamic (fuzzer) |
 | Format string | CWE-134 | Static (dangerous func + taint) + Dynamic (fuzzer) |
 | Integer overflow | CWE-190 | Static (consequence: heap BOF) + Dynamic (boundary fuzzing) |
-| Use-after-free | CWE-416 | Static (limited: intra-procedural only) |
-| Off-by-one | CWE-193 | Static (limited: intra-procedural only) |
 
 > **Security note:** Dynamic analysis executes potentially hostile binaries.
 > Run in a VM or container. Resource limits (`RLIMIT_AS`, `RLIMIT_CPU`) are

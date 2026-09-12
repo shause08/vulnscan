@@ -6,13 +6,12 @@
 
 vulnscan effectue une analyse **intra-procédurale** uniquement. Il ne suit pas les données entre fonctions. Conséquences directes :
 
-- Une vulnérabilité UAF (free + use dans deux fonctions distinctes) n'est pas détectable statiquement.
 - Un taint qui traverse un appel de fonction (ex: `result = process(input); vuln(result)`) n'est pas propagé.
 - La heuristique format-string compense partiellement pour `printf(buf)` où `buf` est un paramètre, mais reste imprecise.
 
 ### Pas de modélisation du tas
 
-L'analyse ne suit pas les allocations et libérations de mémoire dynamique. Les vulnérabilités de type heap-use-after-free, double-free et heap buffer overflow ne sont détectées que par inférence sur la taille des arguments (`memcpy` avec longueur non-constante).
+L'analyse ne suit pas les allocations et libérations de mémoire dynamique. Les vulnérabilités de type heap buffer overflow ne sont détectées que par inférence sur la taille des arguments (`memcpy` avec longueur non-constante).
 
 ### Portée limitée au code x86-64
 
@@ -50,11 +49,6 @@ La majorité des stratégies de fuzzing ciblent stdin. Les vulnérabilités déc
 
 ... nécessitent une instrumentation supplémentaire hors scope de ce projet. Exception partielle : la stratégie `integer_boundary` passe `argv_extra` pour les binaires qui attendent un count en argument.
 
-### Détection UAF et off-by-one silencieux
-
-Les vulnérabilités UAF ne produisent pas de crash immédiat dans le binaire non instrumenté : un use-after-free peut silencieusement utiliser de la mémoire recyclée sans SIGSEGV. De même, un off-by-one qui n'écrase que l'octet de poids faible du saved RBP ne provoque pas de crash détectable par le fuzzer.
-
-Ces bugs ne sont donc pas détectés dynamiquement par vulnscan. Seule l'analyse statique (inférence sur les appels à des fonctions dangereuses) peut les révéler partiellement.
 
 ### Heap overflow sans crash immédiat
 

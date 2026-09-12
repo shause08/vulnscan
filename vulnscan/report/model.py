@@ -23,8 +23,6 @@ class VulnClass(str, Enum):
     HEAP_BOF = "heap-buffer-overflow"
     FORMAT_STRING = "format-string"
     INTEGER_OVERFLOW = "integer-overflow"
-    USE_AFTER_FREE = "use-after-free"
-    OFF_BY_ONE = "off-by-one"
     UNKNOWN = "unknown"
 
 

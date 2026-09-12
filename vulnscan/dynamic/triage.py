@@ -348,13 +348,11 @@ def estimate_severity(
 
     # Score de base par classe
     base = {
-        VulnClass.STACK_BOF:      4,
-        VulnClass.HEAP_BOF:       3,
-        VulnClass.FORMAT_STRING:  3,
-        VulnClass.USE_AFTER_FREE: 3,
+        VulnClass.STACK_BOF:        4,
+        VulnClass.HEAP_BOF:         3,
+        VulnClass.FORMAT_STRING:    3,
         VulnClass.INTEGER_OVERFLOW: 2,
-        VulnClass.OFF_BY_ONE:     2,
-        VulnClass.UNKNOWN:        1,
+        VulnClass.UNKNOWN:          1,
     }.get(vuln_class, 1)
 
     # Ajustement selon l'exploitabilité

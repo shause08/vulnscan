@@ -103,7 +103,7 @@ class TestJSONReport:
         data = json.loads(render_json(_make_result()))
         valid = {
             "stack-buffer-overflow", "heap-buffer-overflow", "format-string",
-            "integer-overflow", "use-after-free", "off-by-one", "unknown",
+            "integer-overflow", "unknown",
         }
         for f in data["findings"]:
             assert f["vuln_class"] in valid
@@ -229,7 +229,7 @@ class TestHTMLReport:
         from vulnscan.report.model import Finding, VulnClass, Severity
         from vulnscan.report.model import ScanResult, Protection
         low_f = Finding(
-            vuln_class=VulnClass.OFF_BY_ONE, function="foo", location="0x0",
+            vuln_class=VulnClass.INTEGER_OVERFLOW, function="foo", location="0x0",
             severity=Severity.LOW, confidence="static", analysis="static",
             evidence="minor",
         )

@@ -155,7 +155,7 @@ offset = cyclic_find(rip_value & 0xFFFFFFFF)  # → 72
 
 ```
 score_base = {STACK_BOF:4, HEAP_BOF:3, FORMAT_STRING:3,
-              USE_AFTER_FREE:3, INTEGER_OVERFLOW:2, OFF_BY_ONE:2, UNKNOWN:1}
+              INTEGER_OVERFLOW:2, UNKNOWN:1}
 
 score += exploit_bonus
   EXPLOITABLE          → +2

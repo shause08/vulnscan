@@ -59,7 +59,7 @@ class TestDisasm:
     def test_no_crash_on_all_corpus(self):
         from vulnscan.static.disasm import analyze
         for name in ["stack_bof_vuln", "heap_bof_vuln", "format_string_vuln",
-                     "integer_overflow_vuln", "uaf_vuln", "off_by_one_vuln"]:
+                     "integer_overflow_vuln", "strcpy_bof_vuln", "heap_overflow_vuln"]:
             info = _parse(name)
             try:
                 findings = analyze(_req(name), info)
@@ -112,7 +112,7 @@ class TestTaint:
     def test_no_crash_on_all_corpus(self):
         from vulnscan.static.taint import analyze
         for name in ["stack_bof_vuln", "heap_bof_vuln", "format_string_vuln",
-                     "integer_overflow_vuln", "uaf_vuln", "off_by_one_vuln"]:
+                     "integer_overflow_vuln", "strcpy_bof_vuln", "heap_overflow_vuln"]:
             info = _parse(name)
             try:
                 findings = analyze(_req(name), info)
